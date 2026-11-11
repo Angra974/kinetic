@@ -57,6 +57,13 @@ the rules in [Versioning](https://veloresearch.github.io/kinetic/versioning.html
   for a registry; the install guide shows Podman with the NVIDIA Container
   Toolkit's CDI devices.
 
+### Server
+
+- A tool call that starts while reasoning is still open ends the reasoning
+  and comes back as a tool call. Qwen3.5 with thinking on often writes
+  `<tool_call>` without closing `</think>` first; the call used to stay in
+  `reasoning_content` and the reply ended with `finish_reason: "stop"`.
+
 ## [0.1.0] - 2026-11-05
 
 The first public release.
