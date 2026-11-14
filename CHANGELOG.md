@@ -51,6 +51,10 @@ the rules in [Versioning](https://veloresearch.github.io/kinetic/versioning.html
   for them, `kinetic doctor` times the copies between each pair of GPUs,
   and `KINETIC_CUDA_P2P=0` turns off direct access between GPUs where it is
   slower than going through memory.
+- `Dockerfile.cuda` takes `CUDA_ARCHS` to build for chosen GPUs only and
+  names its base images in full, so that Podman builds it without asking
+  for a registry; the install guide shows Podman with the NVIDIA Container
+  Toolkit's CDI devices.
 
 ## [0.1.0] - 2026-11-05
 
