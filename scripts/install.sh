@@ -70,6 +70,8 @@ if [ -z "$version" ]; then
     [ -n "$version" ] || fail "could not read the latest release"
 fi
 version="${version#v}"
+[ "$target/$version" != macos-arm64/0.1.0 ] ||
+    fail "Kinetic 0.1.0 has no macOS build; they start with the next release. Until then build from source: https://github.com/$repo/blob/main/docs/src/building.md"
 
 # the cuda archive is the full build: CUDA, Vulkan and the CPU in one binary;
 # macOS has one build, with Metal and the CPU

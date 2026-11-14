@@ -3,6 +3,9 @@
 Kinetic runs on Windows 10 and 11 and on Linux, on x86-64, and on macOS on
 Apple Silicon. Pick one way to install it.
 
+The macOS builds start with the release after 0.1.0. Until then, on a Mac,
+[build from source](building.md).
+
 ## Install script
 
 ```powershell
