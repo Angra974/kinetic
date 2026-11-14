@@ -77,6 +77,9 @@ Turing and newer; generation runs the same kernels as on newer GPUs. The
 Tesla P100 (6.0) also lacks the int8 dot product instruction, which its
 kernels do in plain integer arithmetic, with the same results and less
 speed.
+The release binaries and `Dockerfile.cuda` build with CUDA 12 and have
+kernels for them; a build from source with CUDA 13 does not, see
+[Building](building.md).
 
 Kinetic opens the driver library at runtime (`nvcuda.dll` on Windows,
 `libcuda.so.1` on Linux) and links nothing from the CUDA toolkit, so:

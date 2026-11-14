@@ -45,8 +45,10 @@ much faster, with PTX for the last of them:
 KINETIC_CUDA_ARCHS="60;61" cargo build --release -p kinetic-cli --features cuda
 ```
 
-Pascal and Volta (sm_60 to sm_70) need CUDA 12; CUDA 13 no longer builds
-for them.
+Pascal and Volta (sm_60 to sm_70) need CUDA 12: CUDA 13 no longer builds
+for them, so with CUDA 13 the build leaves them out and says so in a
+warning, and a binary built that way reports on those GPUs that it has no
+kernels for them.
 
 Install the binary into `~/.cargo/bin`:
 
