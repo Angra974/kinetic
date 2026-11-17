@@ -27,6 +27,12 @@ the rules in [Versioning](https://veloresearch.github.io/kinetic/versioning.html
 
 - Vulkan: a recorded command graph kept resetting a timestamp query pool
   that had been destroyed with its recording. Drivers on Metal crashed on it.
+- CUDA: the state a recurrent layer builds for a new sequence zeroed its
+  ring and buffers on the legacy default stream, which no thread may touch
+  while a CUDA graph records; with two models on one device, one recording
+  a step and the other opening a sequence, the second failed with
+  CUDA_ERROR_STREAM_CAPTURE_IMPLICIT. The zeros are queued on the model's
+  own stream now, and a test builds recurrent state while a graph records.
 
 ### Models
 

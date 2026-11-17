@@ -191,6 +191,23 @@ impl<T: DeviceCopy> DeviceBuffer<T> {
         })
     }
 
+    /// Queues setting every byte to zero on `stream`.
+    ///
+    /// The synchronous [`zero`](DeviceBuffer::zero) runs on the legacy
+    /// default stream, which no thread may use while any stream records a
+    /// CUDA graph, so state built while another sequence records uses
+    /// this instead.
+    pub fn zero_on(&mut self, stream: &Stream) -> Result<()> {
+        if self.is_empty() {
+            return Ok(());
+        }
+        let api = self.ctx.enter()?;
+        // SAFETY: the buffer holds `bytes()` bytes.
+        api.check("cuMemsetD8Async", unsafe {
+            (api.memset_d8_async)(self.ptr, 0, self.bytes(), stream.raw())
+        })
+    }
+
     /// Queues setting elements `..len` to zero on `stream`.
     pub(crate) fn zero_prefix(&mut self, len: usize, stream: &Stream) -> Result<()> {
         self.check_holds(len, "zeroed range")?;

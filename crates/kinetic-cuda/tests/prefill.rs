@@ -245,7 +245,7 @@ fn chunked_delta_rule_matches_steps() {
     };
 
     let run = |batched: bool| {
-        let mut state = DeltaState::new(&gpu.ctx, &shape, MAX_BATCH).unwrap();
+        let mut state = DeltaState::new(&gpu.ctx, &gpu.stream, &shape, MAX_BATCH).unwrap();
         let mut batch = Batch::new(&gpu.ctx, PROMPT).unwrap();
         let mut out = GemvInput::batch(&gpu.ctx, vd, PROMPT).unwrap();
         let mut scratch = DeviceBuffer::new(&gpu.ctx, shape.scratch_len(PROMPT)).unwrap();
@@ -286,7 +286,7 @@ fn batched_short_conv_matches_steps() {
     let conv = upload(&gpu, &random(&mut rng, channels * taps, 1.0));
 
     let run = |batched: bool| {
-        let mut state = ConvState::new(&gpu.ctx, channels, taps, MAX_BATCH).unwrap();
+        let mut state = ConvState::new(&gpu.ctx, &gpu.stream, channels, taps, MAX_BATCH).unwrap();
         let mut batch = Batch::new(&gpu.ctx, PROMPT).unwrap();
         let mut out = GemvInput::batch(&gpu.ctx, channels, PROMPT).unwrap();
         outputs(total, batched, |first, n| {
