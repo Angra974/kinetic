@@ -42,6 +42,13 @@ the rules in [Versioning](https://veloresearch.github.io/kinetic/versioning.html
   prompts run 16 tokens at a time; generation runs the same kernels as on
   newer GPUs. `KINETIC_CUDA_ARCHS` builds the kernels for chosen GPUs
   only.
+- Several CUDA GPUs: `--gpus 0,1` on `run`, `chat`, `serve` and `bench` spreads
+  a dense model's layers over them, with the same output as on one GPU.
+  Mixture-of-experts models, Gemma 4 E2B/E4B, prediction-block drafts and
+  shared passes stay on one GPU for now. `kinetic fit --gpus` estimates
+  for them, `kinetic doctor` times the copies between each pair of GPUs,
+  and `KINETIC_CUDA_P2P=0` turns off direct access between GPUs where it is
+  slower than going through memory.
 
 ## [0.1.0] - 2026-11-05
 

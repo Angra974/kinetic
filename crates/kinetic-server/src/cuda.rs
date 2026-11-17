@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use kinetic_cuda::MAX_BATCH;
 use kinetic_models::cuda::{
-    CudaModel, CudaRunner, CudaState, Placement, PREFILL_BATCH, PREFILL_GRID,
+    CudaModel, CudaRunner, CudaState, Placement, PREFILL_BATCH, PREFILL_CALL, PREFILL_GRID,
 };
 use kinetic_models::speculative::{Decoder, Ensemble, Policy};
 use kinetic_models::warm::{Runner, Warm};
@@ -79,13 +79,31 @@ impl<'a> CudaBackend<'a> {
         context: usize,
         placement: Placement,
     ) -> Result<Self, LoadError> {
-        let name = kinetic_cuda::Device::get(0)
-            .and_then(|d| d.info())
-            .map_err(cuda_error)?
-            .name;
+        let ordinals = match placement.devices.as_slice() {
+            [] => vec![0],
+            d => d.to_vec(),
+        };
+        let names = ordinals
+            .iter()
+            .map(|&d| {
+                kinetic_cuda::Device::get(d)
+                    .and_then(|d| d.info())
+                    .map(|i| i.name)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(cuda_error)?;
         // slots on other threads share it, see the SAFETY note on Send
         #[allow(clippy::arc_with_non_send_sync)]
         let gpu = Arc::new(CudaModel::load_with(model, context, placement)?);
+        let name = match gpu.device_split().as_slice() {
+            [_] => names[0].clone(),
+            split => names
+                .iter()
+                .zip(split)
+                .map(|(name, n)| format!("{name} ({n} layers)"))
+                .collect::<Vec<_>>()
+                .join(" + "),
+        };
         let device = match gpu.host_layers() {
             0 => name,
             host => format!(
@@ -137,8 +155,19 @@ impl<'a> CudaBackend<'a> {
     /// starts resume where a cold prefill cuts its batches, so they give
     /// exactly its output.
     pub fn with_warm(mut self, warm: Warm<'a>) -> Self {
-        self.warm = Some(warm.aligned(PREFILL_BATCH));
+        let batches = self.prefill_call() / PREFILL_BATCH;
+        self.warm = Some(warm.aligned(PREFILL_BATCH).batches_per_call(batches));
         self
+    }
+
+    /// Most prompt tokens to hand the model at once: several batches when
+    /// it is split over GPUs, which overlap them, and one batch otherwise,
+    /// so a model on one GPU cuts its prompts as it always has.
+    fn prefill_call(&self) -> usize {
+        match self.gpu.device_split().len() {
+            1 => PREFILL_BATCH,
+            _ => PREFILL_CALL,
+        }
     }
 
     /// Another backend on the same device and weights, with a sequence and
@@ -256,7 +285,8 @@ impl<'a> CudaBackend<'a> {
             _ => PREFILL_GRID,
         };
         let last = start + (rest - 1) / step * step;
-        for batch in prompt[start..last].chunks(PREFILL_BATCH) {
+        let call = self.prefill_call();
+        for batch in prompt[start..last].chunks(call) {
             self.decoder.feed(&*self.gpu, &mut seq.state, batch);
         }
         seq.tokens.extend_from_slice(&prompt[start..last]);
@@ -284,7 +314,8 @@ impl<'a> CudaBackend<'a> {
         let mark = device(self.gpu.truncate(self.model, state, mark));
         let end = mark + (tokens.len() - mark) / PREFILL_GRID * PREFILL_GRID;
         self.decoder.reset(&*self.gpu);
-        for batch in tokens[mark..end].chunks(PREFILL_BATCH) {
+        let call = self.prefill_call();
+        for batch in tokens[mark..end].chunks(call) {
             self.decoder.feed(&*self.gpu, state, batch);
         }
         tokens.truncate(end);
