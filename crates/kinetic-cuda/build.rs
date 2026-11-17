@@ -11,10 +11,18 @@ use std::process::Command;
 
 const SOURCE: &str = "cuda/kernels.cu";
 
-/// Machine code for each architecture from Turing on, plus PTX for
+/// Machine code for each architecture from Pascal on, plus PTX for
 /// compute_90 and compute_120 so the driver can compile for GPUs newer than
 /// this list (PTX only runs on devices of at least its compute capability).
+///
+/// Pascal (sm_60, sm_61) and Volta (sm_70) have no tensor-core instructions
+/// that the kernels use; there the kernels that need them are never
+/// launched. CUDA 13 no longer builds for them, see [`LAST_CUDA_FOR`].
+/// `KINETIC_CUDA_ARCHS` replaces this list, see [`gencodes`].
 const GENCODE: &[&str] = &[
+    "arch=compute_60,code=sm_60",
+    "arch=compute_61,code=sm_61",
+    "arch=compute_70,code=sm_70",
     "arch=compute_75,code=sm_75",
     "arch=compute_80,code=sm_80",
     "arch=compute_86,code=sm_86",
@@ -23,10 +31,15 @@ const GENCODE: &[&str] = &[
     "arch=compute_120,code=[sm_120,compute_120]",
 ];
 
+/// The architectures of [`GENCODE`] that a CUDA release after this one no
+/// longer builds for.
+const LAST_CUDA_FOR: (u32, &[&str]) = (12, &["60", "61", "70"]);
+
 fn main() {
     println!("cargo:rerun-if-changed=cuda");
     println!("cargo:rerun-if-env-changed=NVCC");
     println!("cargo:rerun-if-env-changed=CUDA_PATH");
+    println!("cargo:rerun-if-env-changed=KINETIC_CUDA_ARCHS");
 
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"))
         .join("kernels.fatbin");
@@ -40,9 +53,11 @@ fn main() {
     cmd.args(["-fatbin", "-O3", "-std=c++17", "-o"])
         .arg(&out)
         .arg(SOURCE);
-    for gencode in GENCODE {
-        cmd.args(["-gencode", gencode]);
+    for gencode in gencodes(nvcc_release(&nvcc)) {
+        cmd.args(["-gencode", &gencode]);
     }
+    // nvcc 12 warns that sm_60 to sm_70 are deprecated; they still build.
+    cmd.arg("-Wno-deprecated-gpu-targets");
     if cfg!(windows) {
         // nvcc checks the MSVC version against a list fixed at its release;
         // newer toolsets compile these kernels fine.
@@ -55,6 +70,86 @@ fn main() {
         .status()
         .unwrap_or_else(|e| panic!("running {}: {e}", nvcc.display()));
     assert!(status.success(), "nvcc failed to compile {SOURCE}");
+}
+
+/// The `-gencode` values for the CUDA `release` that nvcc is, if known:
+/// [`GENCODE`] less what that release no longer builds, or from
+/// `KINETIC_CUDA_ARCHS`, a list of compute capabilities such as `60;61` or
+/// `61,86` that builds machine code for exactly those, with PTX for the last
+/// so newer GPUs can still run it. A smaller list builds faster and makes a
+/// smaller binary.
+fn gencodes(release: Option<u32>) -> Vec<String> {
+    let (last, old) = LAST_CUDA_FOR;
+    let too_new = release.filter(|&r| r > last);
+    let Some(list) = env::var("KINETIC_CUDA_ARCHS")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+    else {
+        let built = |g: &&&str| {
+            let arch = g.trim_start_matches("arch=compute_");
+            too_new.is_none() || !old.iter().any(|o| arch.starts_with(&format!("{o},")))
+        };
+        if let Some(r) = too_new {
+            println!(
+                "cargo:warning=CUDA {r} builds no kernels for Pascal and Volta (sm_60 to sm_70); CUDA {last} does"
+            );
+        }
+        return GENCODE
+            .iter()
+            .filter(built)
+            .map(|g| g.to_string())
+            .collect();
+    };
+    let archs: Vec<&str> = list
+        .split([';', ',', ' '])
+        .map(|a| {
+            a.trim()
+                .trim_start_matches("sm_")
+                .trim_start_matches("compute_")
+        })
+        .filter(|a| !a.is_empty())
+        .collect();
+    assert!(
+        !archs.is_empty() && archs.iter().all(|a| a.bytes().all(|b| b.is_ascii_digit())),
+        "KINETIC_CUDA_ARCHS takes compute capabilities such as \"60;61\", got {list:?}"
+    );
+    if let (Some(r), Some(a)) = (too_new, archs.iter().find(|a| old.contains(a))) {
+        panic!(
+            "KINETIC_CUDA_ARCHS asks for sm_{a}, which CUDA {r} no longer builds; use CUDA {last}"
+        );
+    }
+    let last = archs.len() - 1;
+    archs
+        .iter()
+        .enumerate()
+        .map(|(i, a)| match i == last {
+            true => format!("arch=compute_{a},code=[sm_{a},compute_{a}]"),
+            false => format!("arch=compute_{a},code=sm_{a}"),
+        })
+        .collect()
+}
+
+/// The major CUDA release of `nvcc`, from the `release 12.8` that
+/// `nvcc --version` prints. If that can't be read (a wrapper script, say),
+/// the build warns and assumes a release that still builds every GPU.
+fn nvcc_release(nvcc: &Path) -> Option<u32> {
+    let release = Command::new(nvcc)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|out| {
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+            let (_, rest) = text.split_once("release ")?;
+            rest.split('.').next()?.trim().parse().ok()
+        });
+    if release.is_none() {
+        let (last, _) = LAST_CUDA_FOR;
+        println!(
+            "cargo:warning=could not read the CUDA release from `{} --version`; building for Pascal and Volta too, which needs CUDA {last} or older (set KINETIC_CUDA_ARCHS otherwise)",
+            nvcc.display()
+        );
+    }
+    release
 }
 
 /// `$NVCC`, then `$CUDA_PATH/bin`, then `nvcc` on `PATH`.

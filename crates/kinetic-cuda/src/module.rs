@@ -4,8 +4,11 @@ use std::rc::Rc;
 
 use crate::context::Context;
 use crate::driver::{CuFunction, CuModule};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::stream::Stream;
+
+/// `CUDA_ERROR_NO_BINARY_FOR_GPU`: the image has no code this device runs.
+const NO_BINARY_FOR_GPU: i32 = 209;
 
 /// Loaded device code.
 pub struct Module {
@@ -24,9 +27,18 @@ impl Module {
         let api = ctx.enter()?;
         let mut raw = ptr::null_mut();
         // SAFETY: the caller guarantees the image is well-formed.
-        api.check("cuModuleLoadData", unsafe {
+        let loaded = api.check("cuModuleLoadData", unsafe {
             (api.module_load_data)(&mut raw, image.as_ptr().cast::<c_void>())
-        })?;
+        });
+        if let Err(Error::Cuda {
+            code: NO_BINARY_FOR_GPU,
+            ..
+        }) = loaded
+        {
+            let info = ctx.device().info()?;
+            return Err(Error::KernelsNotBuiltFor(info.compute_capability));
+        }
+        loaded?;
         Ok(Rc::new(Module {
             raw,
             ctx: ctx.clone(),
