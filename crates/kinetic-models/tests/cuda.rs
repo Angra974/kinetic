@@ -79,6 +79,7 @@ fn batches_and_rollbacks_change_no_bit() {
     a_batch_matches_token_by_token(&split);
     rollback_leaves_the_state_as_if_never_run(&split);
     a_host_copy_restores_the_state(&split, &model);
+    a_reset_state_is_a_fresh_one(&split);
     drop(split);
 
     // A device with room for about half the weights.
@@ -111,6 +112,19 @@ fn logits(gpu: &CudaModel) -> Vec<u32> {
         all.extend(bits(&gpu.run(&mut state, &[t], false).unwrap().logits));
     }
     all
+}
+
+/// A state reset after a sequence gives what a new one gives, on every
+/// layer, those on the host too.
+fn a_reset_state_is_a_fresh_one(gpu: &CudaModel) {
+    let mut fresh = gpu.new_state().unwrap();
+    let expected = gpu.run(&mut fresh, &NEXT, true).unwrap().logits;
+
+    let mut reused = gpu.new_state().unwrap();
+    gpu.run(&mut reused, &PROMPT, false).unwrap();
+    gpu.reset_state(&mut reused).unwrap();
+    let logits = gpu.run(&mut reused, &NEXT, true).unwrap().logits;
+    assert_eq!(bits(&logits), bits(&expected));
 }
 
 fn a_batch_matches_token_by_token(gpu: &CudaModel) {

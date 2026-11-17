@@ -203,8 +203,8 @@ impl CudaModel<'_> {
     }
 
     /// Empties `dev`, a state of this model, for a new sequence in the same
-    /// buffers: recurrent layers are zeroed on the device, caches simply
-    /// start over.
+    /// buffers: recurrent layers are zeroed on the device, the layers on the
+    /// host start afresh, caches simply start over.
     pub fn reset_state(&self, dev: &mut CudaState) -> kinetic_cuda::Result<()> {
         if dev.pos == 0 && dev.checkpoint.is_none() {
             return Ok(());
@@ -213,6 +213,7 @@ impl CudaModel<'_> {
         dev.checkpoint = None;
         dev.marks.clear();
         dev.work.batch.set_grid_shift(0);
+        dev.work.front = self.new_front();
         self.device_layers(&mut dev.work)
             .try_for_each(|(gpu, _, s)| clear_layer(s, &gpu.stream))
     }
