@@ -66,12 +66,14 @@ fn outputs(
 }
 
 /// Every output row of [`outputs`] for random attention inputs over a cache
-/// storing keys as `k` and values as `v`.
+/// storing keys as `k` and values as `v`. With `copied` each batch comes
+/// from one of another capacity, as layers on a next device take theirs.
 fn attention_outputs(
     gpu: &Gpu,
     shape: AttentionShape,
     [kt, vt]: [KvType; 2],
     batched: bool,
+    copied: bool,
 ) -> Vec<f32> {
     let total = PROMPT + MAX_BATCH;
     let (hd, kv_dim) = (shape.head_dim, shape.n_head_kv * shape.head_dim);
@@ -88,11 +90,17 @@ fn attention_outputs(
     let mut cache = KvCache::with_types(&gpu.ctx, &shape, slots, kt, vt).unwrap();
     {
         let mut batch = Batch::new(&gpu.ctx, PROMPT).unwrap();
+        let mut source = Batch::new(&gpu.ctx, 2 * PROMPT).unwrap();
         let mut out = GemvInput::batch(&gpu.ctx, width, PROMPT).unwrap();
         let mut scratch = DeviceBuffer::new(&gpu.ctx, shape.scratch_len(MAX_BATCH, slots)).unwrap();
         outputs(total, batched, |first, n| {
             let range = first..first + n;
-            batch.set(first, &vec![0; n], &gpu.stream).unwrap();
+            if copied {
+                source.set(first, &vec![0; n], &gpu.stream).unwrap();
+                batch.copy_from(&source, &gpu.stream).unwrap();
+            } else {
+                batch.set(first, &vec![0; n], &gpu.stream).unwrap();
+            }
             let mut q = rows(gpu, &q_all, range.clone(), shape.q_len());
             let mut k = rows(gpu, &k_all, range.clone(), kv_dim);
             let v = rows(gpu, &v_all, range.clone(), kv_dim);
@@ -128,9 +136,21 @@ fn attention_outputs(
 fn check_attention(shape: AttentionShape) {
     let Some(gpu) = large_batch_gpu() else { return };
     let f16 = [KvType::F16; 2];
-    let steps = attention_outputs(&gpu, shape, f16, false);
-    let batched = attention_outputs(&gpu, shape, f16, true);
+    let steps = attention_outputs(&gpu, shape, f16, false, false);
+    let batched = attention_outputs(&gpu, shape, f16, true, false);
     assert_close(&format!("attention {shape:?}"), &batched, &steps, 1e-5);
+}
+
+/// A batch handed to another device keeps the positions of every step, so
+/// kernels that take a long batch a step at a time see them there too.
+#[test]
+fn a_copied_batch_attends_like_its_source() {
+    let Some(gpu) = large_batch_gpu() else { return };
+    let shape = attention_shape(64, None, false);
+    let f16 = [KvType::F16; 2];
+    let steps = attention_outputs(&gpu, shape, f16, false, false);
+    let copied = attention_outputs(&gpu, shape, f16, true, true);
+    assert_close("copied batch", &copied, &steps, 1e-5);
 }
 
 fn attention_shape(
@@ -176,16 +196,16 @@ fn q8_0_cache_stays_close_to_f16() {
         attention_shape(256, None, true),
         attention_shape(64, Some(40), false),
     ] {
-        let exact = attention_outputs(&gpu, shape, [KvType::F16; 2], false);
+        let exact = attention_outputs(&gpu, shape, [KvType::F16; 2], false, false);
         for types in [
             [KvType::Q8_0; 2],
             [KvType::Q8_0, KvType::F16],
             [KvType::F16, KvType::Q8_0],
         ] {
-            let steps = attention_outputs(&gpu, shape, types, false);
+            let steps = attention_outputs(&gpu, shape, types, false, false);
             assert_close(&format!("{types:?} {shape:?}"), &steps, &exact, 2e-2);
             // the flash kernel widens q8_0 to f16 tiles
-            let batched = attention_outputs(&gpu, shape, types, true);
+            let batched = attention_outputs(&gpu, shape, types, true, false);
             assert_close(
                 &format!("flash {types:?} {shape:?}"),
                 &batched,

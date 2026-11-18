@@ -135,7 +135,21 @@ impl Batch {
         // grid positions follow the ids, so a grid batch copies wholly
         self.host.clone_from(&src.host);
         self.grid_shift = src.grid_shift;
-        self.device.copy_from_device(0, &src.device, 0..len, stream)
+        self.device
+            .copy_from_device(0, &src.device, 0..len, stream)?;
+        // the steps after the first, which kernels taking the batch a step
+        // at a time read, sit after the room for all tokens of each batch
+        let steps = src.len().div_ceil(MAX_BATCH);
+        if steps < 2 {
+            return Ok(());
+        }
+        let from = Batch::steps_at(src.capacity);
+        self.device.copy_from_device(
+            Batch::steps_at(self.capacity),
+            &src.device,
+            from..from + steps,
+            stream,
+        )
     }
 
     /// Tokens in the batch.
