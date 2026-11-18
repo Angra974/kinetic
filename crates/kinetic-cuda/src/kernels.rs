@@ -51,6 +51,8 @@ pub struct Kernels {
     /// Attention for batches larger than [`MAX_BATCH`], where the device has
     /// the shared memory it needs.
     pub(crate) attn_flash: Option<Function>,
+    /// The same in f32 without tensor cores, for heads of 128 to 512.
+    pub(crate) attn_tile: Option<Function>,
     pub(crate) attn_combine: Function,
     pub(crate) attn_copy_kv: Function,
     pub(crate) delta_conv: Function,
@@ -79,6 +81,8 @@ pub struct Kernels {
     pub(crate) multiprocessors: u32,
     /// See [`DeviceInfo::tensor_cores`](crate::DeviceInfo::tensor_cores).
     pub(crate) tensor_cores: bool,
+    /// See [`Kernels::half_products`].
+    pub(crate) half: bool,
 }
 
 impl Kernels {
@@ -109,18 +113,26 @@ impl Kernels {
             })
             .transpose()?;
         // The tiled products and flash attention run on tensor cores; without
-        // them every product is a GEMV and batches go MAX_BATCH at a time.
+        // them both run in f32, and attention to heads of 64 MAX_BATCH tokens
+        // at a time.
         let tensor_cores = info.tensor_cores();
-        let gemm = match tensor_cores {
-            true => gemm_functions(&module)?,
-            false => WEIGHT_TYPES.iter().map(|_| Vec::new()).collect(),
-        };
+        let gemm = gemm_functions(&module, tensor_cores)?;
+        // The binary that runs is for sm_60 or sm_70.
+        let half = !tensor_cores
+            && gemm
+                .iter()
+                .find_map(|fs| fs.first())
+                .and_then(|f| f.binary_version().ok())
+                .is_some_and(|v| v == 60 || v == 70);
         let attn_flash = module.function(c"attn_flash")?;
         let attn_flash = (tensor_cores
             && attn_flash
                 .allow_shared(FLASH_HEADS.into_iter().map(flash_shared).max().unwrap_or(0))
                 .is_ok())
         .then_some(attn_flash);
+        let attn_tile = (!tensor_cores)
+            .then(|| module.function(c"attn_tile"))
+            .transpose()?;
         let moe = |prefix: &str| -> Result<[Function; EXPERT_TYPES.len()]> {
             let named = |ty: &str| {
                 module.function(
@@ -158,6 +170,7 @@ impl Kernels {
                 module.function(c"attn_chunk_2")?,
             ],
             attn_flash,
+            attn_tile,
             attn_combine: module.function(c"attn_combine")?,
             attn_copy_kv: module.function(c"attn_copy_kv")?,
             delta_conv: module.function(c"delta_conv")?,
@@ -184,13 +197,26 @@ impl Kernels {
             read_sum: module.function(c"read_sum")?,
             multiprocessors: info.multiprocessors,
             tensor_cores,
+            half,
         })
     }
 
     /// Whether batches of more than [`MAX_BATCH`] tokens can run in one pass;
-    /// without, they must go in steps of at most that many.
+    /// without, they must go in steps of at most that many. Devices without
+    /// tensor cores run them with f32 products and attention, attention to
+    /// heads of 64 in steps of [`MAX_BATCH`] tokens and the delta rule token
+    /// by token.
     pub fn large_batches(&self) -> bool {
-        self.attn_flash.is_some()
+        self.attn_flash.is_some() || !self.tensor_cores
+    }
+
+    /// Whether the products of large batches multiply in f16 pairs: on
+    /// devices without tensor cores, where the binary that runs is for sm_60
+    /// or sm_70, whose f16 arithmetic is twice as fast as f32. They are then
+    /// accurate to about one part in a thousand of their terms rather than
+    /// to f32 rounding.
+    pub fn half_products(&self) -> bool {
+        self.half
     }
 
     /// Reads all of `data` once and adds its sum as 32-bit words to `out[0]`.
