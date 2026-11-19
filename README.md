@@ -32,28 +32,28 @@ speed-up ever changes the answer.
 ## Status: 0.1.0 Beta 1
 
 Kinetic is a week old in public and it is a beta. Thank you to everyone who ran it, told
-us what broke and sent pull requests. What Beta 2 fixes and adds:
+us what broke and sent pull requests. What Beta 2 fixes and adds, ✅ already on main, 🔜 still to do:
 
-- **The same answer on every request when a model is split between the GPU and the CPU.**
+- ✅ **The same answer on every request when a model is split between the GPU and the CPU.**
   Reused states kept the CPU layers' previous conversation, so later answers could differ;
   it fits the one report of the exactness check failing on an RTX 4060.
-- **Honest benchmark numbers.** The edit numbers on this page are for a repeated edit; on a
+- ✅ **macOS on Apple Silicon**, on the CPU and on the GPU through Metal.
+- ✅ **Older NVIDIA GPUs** (Pascal, Volta) and **several GPUs for one model** with `--gpus`.
+- ✅ **Faster follow-ups in a conversation.**
+- ✅ **Containers**: `docker stop` ends the server at once, and the CUDA image builds for
+  chosen GPUs and with Podman.
+- ✅ **Clearer messages** for GPUs Vulkan refuses and for weight types a GPU cannot run.
+- 🔜 **Honest benchmark numbers.** The edit numbers on this page are for a repeated edit; on a
   first run the gain over llama.cpp is up to 2.5x on edits and up to 1.4x on plain
   generation on our machine. Beta 2 reports both cases separately.
-- **Tool calls with thinking on** no longer end up inside the reasoning
+- 🔜 **Tool calls with thinking on** no longer end up inside the reasoning
   ([#5](https://github.com/Veloresearch/kinetic/issues/5)).
-- **Unsloth UD quants on NVIDIA GPUs**: IQ4_XS, IQ3_XXS, IQ2_XS and IQ2_XXS
+- 🔜 **Unsloth UD quants on NVIDIA GPUs**: IQ4_XS, IQ3_XXS, IQ2_XS and IQ2_XXS
   ([#1](https://github.com/Veloresearch/kinetic/issues/1)).
-- **macOS on Apple Silicon**, on the CPU and on the GPU through Metal.
-- **Older NVIDIA GPUs** (Pascal, Volta) and **several GPUs for one model** with `--gpus`.
-- **Speculative decoding that is never slower** than plain decoding on models split
+- 🔜 **Speculative decoding that is never slower** than plain decoding on models split
   between the GPU and the CPU.
-- **Faster follow-ups in a conversation.**
-- **`-hf`**, as llama.cpp takes it.
-- **RAM and VRAM per model in Python** ([#24](https://github.com/Veloresearch/kinetic/issues/24)).
-- **Containers**: `docker stop` ends the server at once, and the CUDA image builds for
-  chosen GPUs and with Podman.
-- **Clearer messages** for GPUs Vulkan refuses and for weight types a GPU cannot run.
+- 🔜 **`-hf`**, as llama.cpp takes it.
+- 🔜 **RAM and VRAM per model in Python** ([#24](https://github.com/Veloresearch/kinetic/issues/24)).
 
 Questions and ideas go to [Discussions](https://github.com/Veloresearch/kinetic/discussions),
 bugs to [issues](https://github.com/Veloresearch/kinetic/issues/new). We read all of them.
