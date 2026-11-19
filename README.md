@@ -31,29 +31,32 @@ speed-up ever changes the answer.
 
 ## Status: 0.1.0 Beta 1
 
-Kinetic is two days old in public and it is a beta. Thank you to everyone who ran it and
-told us what broke. This is what we know about and are working on for Beta 2:
+Kinetic is a week old in public and it is a beta. Thank you to everyone who ran it, told
+us what broke and sent pull requests. What Beta 2 fixes and adds:
 
-- **The edit numbers on this page are for a repeated edit.** The benchmark took the best of
-  three runs of the same prompt, and later runs reuse the earlier answer. On a first run the
-  gain over llama.cpp is smaller: up to 2.5x on edits and up to 1.4x on plain generation on
-  our machine. Beta 2 reports both cases separately and this page gets the new numbers.
-- **One report of the exactness check failing** on an RTX 4060 with Qwen3.5-4B. We have not
-  reproduced it yet and treat it as the top priority.
-- **Unsloth UD quants on the GPU** (IQ4_XS, IQ3_XXS, IQ2_XS, IQ2_XXS) run on the CPU only
-  today ([#1](https://github.com/Veloresearch/kinetic/issues/1)). CUDA support is written and in review.
-- **Tool calls with thinking on** can come back inside the reasoning
-  ([#5](https://github.com/Veloresearch/kinetic/issues/5)). Until the fix, send
-  `"chat_template_kwargs": {"enable_thinking": false}`.
-- **macOS on Apple Silicon** is on main, from a community pull request
-  ([#4](https://github.com/Veloresearch/kinetic/pull/4)), and ships with Beta 2. Until then,
-  build it from source.
-- **AMD on Vulkan:** older integrated GPUs with 64-wide subgroups are refused
-  ([#2](https://github.com/Veloresearch/kinetic/issues/2)), and we have a crash report on
-  the RX 9070 under Linux.
+- **The same answer on every request when a model is split between the GPU and the CPU.**
+  Reused states kept the CPU layers' previous conversation, so later answers could differ;
+  it fits the one report of the exactness check failing on an RTX 4060.
+- **Honest benchmark numbers.** The edit numbers on this page are for a repeated edit; on a
+  first run the gain over llama.cpp is up to 2.5x on edits and up to 1.4x on plain
+  generation on our machine. Beta 2 reports both cases separately.
+- **Tool calls with thinking on** no longer end up inside the reasoning
+  ([#5](https://github.com/Veloresearch/kinetic/issues/5)).
+- **Unsloth UD quants on NVIDIA GPUs**: IQ4_XS, IQ3_XXS, IQ2_XS and IQ2_XXS
+  ([#1](https://github.com/Veloresearch/kinetic/issues/1)).
+- **macOS on Apple Silicon**, on the CPU and on the GPU through Metal.
+- **Older NVIDIA GPUs** (Pascal, Volta) and **several GPUs for one model** with `--gpus`.
+- **Speculative decoding that is never slower** than plain decoding on models split
+  between the GPU and the CPU.
+- **Faster follow-ups in a conversation.**
+- **`-hf`**, as llama.cpp takes it.
+- **RAM and VRAM per model in Python** ([#24](https://github.com/Veloresearch/kinetic/issues/24)).
+- **Containers**: `docker stop` ends the server at once, and the CUDA image builds for
+  chosen GPUs and with Podman.
+- **Clearer messages** for GPUs Vulkan refuses and for weight types a GPU cannot run.
 
-Found something else? [Open an issue](https://github.com/Veloresearch/kinetic/issues/new).
-We read all of them.
+Questions and ideas go to [Discussions](https://github.com/Veloresearch/kinetic/discussions),
+bugs to [issues](https://github.com/Veloresearch/kinetic/issues/new). We read all of them.
 
 <a name="install"></a>
 
