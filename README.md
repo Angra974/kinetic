@@ -831,8 +831,9 @@ see [SECURITY.md](SECURITY.md).
 ## License
 
 Kinetic is licensed under the [Apache License 2.0](LICENSE). Third-party
-material is listed in [NOTICE](NOTICE). "Kinetic" and its logo are
-trademarks of Velocity; see [TRADEMARKS.md](TRADEMARKS.md).
+material is listed in [NOTICE](NOTICE). "Kinetic", its logo and "RAD-1"
+are trademarks of Velocity, and a fork that keeps Kinetic's technologies
+says they come from Kinetic; see [TRADEMARKS.md](TRADEMARKS.md).
 
 <br>
 
