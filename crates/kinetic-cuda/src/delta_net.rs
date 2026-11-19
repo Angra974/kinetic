@@ -139,13 +139,18 @@ pub struct DeltaState {
 impl DeltaState {
     /// A zero state that records up to `max_tokens` tokens between a
     /// checkpoint and its rollback, and runs up to that many per pass.
-    pub fn new(ctx: &Rc<Context>, shape: &DeltaShape, max_tokens: usize) -> Result<DeltaState> {
+    pub fn new(
+        ctx: &Rc<Context>,
+        stream: &Stream,
+        shape: &DeltaShape,
+        max_tokens: usize,
+    ) -> Result<DeltaState> {
         shape.check()?;
         let ring_len = shape.conv_taps - 1 + max_tokens;
         let mut ring = DeviceBuffer::new(ctx, ring_len * shape.channels())?;
         let mut state = DeviceBuffer::new(ctx, shape.state_len())?;
-        ring.zero()?;
-        state.zero()?;
+        ring.zero_on(stream)?;
+        state.zero_on(stream)?;
         Ok(DeltaState {
             ring,
             journal: DeviceBuffer::new(ctx, max_tokens * shape.journal_stride())?,
