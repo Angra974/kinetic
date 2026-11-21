@@ -162,6 +162,9 @@ enum Command {
             conflicts_with = "compare"
         )]
         depth: usize,
+        /// Tokens in the prompt test
+        #[arg(long, value_name = "N", default_value_t = 512, conflicts_with = "compare")]
+        prompt: usize,
         #[command(flatten)]
         off: OffArg,
     },
@@ -688,6 +691,7 @@ fn run(cli: Cli) -> Result<()> {
             gpus,
             compare,
             depth,
+            prompt,
             off,
         } => {
             let model = model.locate()?;
@@ -706,6 +710,7 @@ fn run(cli: Cli) -> Result<()> {
             let tests = bench::Tests {
                 repetitions: repetitions.max(1),
                 depth,
+                prompt: prompt.max(1),
             };
             bench::run(
                 &model.path,
