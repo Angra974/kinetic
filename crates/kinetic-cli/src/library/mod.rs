@@ -90,7 +90,7 @@ fn discover_in(roots: &[(Store, PathBuf)]) -> Vec<Local> {
 fn from_groups(groups: Vec<folder::Group>, store: Store) -> Vec<Local> {
     let mut found = Vec::new();
     for group in groups {
-        let (projectors, models): (Vec<_>, Vec<_>) = group
+        let (extras, models): (Vec<_>, Vec<_>) = group
             .files
             .into_iter()
             .filter(|f| header::shard(f).is_none_or(|(n, _)| n == 1))
@@ -98,7 +98,14 @@ fn from_groups(groups: Vec<folder::Group>, store: Store) -> Vec<Local> {
                 let h = Header::read(&f);
                 (f, h)
             })
-            .partition(|(_, h)| h.as_ref().is_ok_and(Header::is_projector));
+            .partition(|(_, h)| {
+                h.as_ref()
+                    .is_ok_and(|h| h.is_projector() || h.is_adapter())
+            });
+        let projectors: Vec<_> = extras
+            .into_iter()
+            .filter(|(_, h)| h.as_ref().is_ok_and(Header::is_projector))
+            .collect();
         let several = models.len() > 1;
         for (path, header) in models {
             let stem = header::model_stem(&path);
