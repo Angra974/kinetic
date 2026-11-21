@@ -36,6 +36,11 @@ impl VulkanAttention {
             Gate::PerHead(_) => AttentionGate::PerHead,
             Gate::None => AttentionGate::None,
         };
+        let v_norm = match &a.v_norm {
+            None => false,
+            Some(w) if w.iter().all(|&w| w == 1.0) => true,
+            Some(_) => return Err(unsupported("weighted value norms")),
+        };
         let per_head = |n: &Option<Vec<f32>>| n.as_ref().is_none_or(|w| w.len() == a.head_dim);
         if !per_head(&a.q_norm) || !per_head(&a.k_norm) {
             return Err(unsupported("query and key norms across heads"));
@@ -51,6 +56,7 @@ impl VulkanAttention {
             window: a.window,
             scale: a.scale.unwrap_or(1.0 / (a.head_dim as f32).sqrt()),
             eps: a.eps,
+            v_norm,
         };
         if a.q.rows != a.n_head * shape.q_head_len() || a.k.rows != shape.kv_dim() {
             return Err(LoadError(format!(

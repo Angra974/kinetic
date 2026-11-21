@@ -26,7 +26,7 @@ pub enum AttentionGate {
 pub struct AttentionShape {
     pub n_head: usize,
     pub n_head_kv: usize,
-    /// 64, 128 or 256.
+    /// 64, 128, 256 or 512.
     pub head_dim: usize,
     /// Leading values of each head that rotate.
     pub rope_dims: usize,
@@ -41,6 +41,8 @@ pub struct AttentionShape {
     /// Multiplies query-key scores.
     pub scale: f32,
     pub eps: f32,
+    /// Whether values take an RMS norm by no weights before they are cached.
+    pub v_norm: bool,
 }
 
 impl AttentionShape {
@@ -75,7 +77,7 @@ impl AttentionShape {
     }
 
     fn check(&self) -> Result<()> {
-        let fits = matches!(self.head_dim, 64 | 128 | 256)
+        let fits = matches!(self.head_dim, 64 | 128 | 256 | 512)
             && self.n_head_kv > 0
             && self.n_head.is_multiple_of(self.n_head_kv)
             && self.rope_dims.is_multiple_of(2)
@@ -219,7 +221,8 @@ impl Kernels {
             | flag(shape.norm_after_rope, 2)
             | flag(consts.bias.is_some(), 4)
             | flag(consts.q_norm.is_some(), 8)
-            | flag(consts.k_norm.is_some(), 16);
+            | flag(consts.k_norm.is_some(), 16)
+            | flag(shape.v_norm, 32);
         let word = |at: Option<usize>| at.unwrap_or(0) as u32;
         let gate = match shape.gate {
             AttentionGate::None => 0,
@@ -229,7 +232,8 @@ impl Kernels {
         let attend = match hd {
             64 => &self.attend_64,
             128 => &self.attend_128,
-            _ => &self.attend_256,
+            256 => &self.attend_256,
+            _ => &self.attend_512,
         };
         let batch_words = batch.device().allocation();
         let [ox, oq, od] = out.outputs();

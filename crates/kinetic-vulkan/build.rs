@@ -50,6 +50,11 @@ const KERNELS: &[(&str, &str, &[&str])] = &[
         "const PAIRS: u32 = 4u;",
         &["attend", "put_q8"],
     ),
+    (
+        "attend_512",
+        "const PAIRS: u32 = 8u;",
+        &["attend", "put_q8"],
+    ),
 ];
 
 /// Kernels that take one part more on Metal, whose GEMV kernels are
