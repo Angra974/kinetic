@@ -25,7 +25,7 @@ var<immediate> shape: Shape;
 @group(0) @binding(5) var<storage, read> batch: array<u32>;
 
 const ROWS_PER_GROUP: u32 = 4u;
-const TOKENS: u32 = 8u;
+const TOKENS: u32 = 16u;
 const NIBBLES: u32 = 0x0F0F0F0Fu;
 
 @compute @workgroup_size(128)
@@ -62,6 +62,14 @@ fn main(
         var s5 = 0.0;
         var s6 = 0.0;
         var s7 = 0.0;
+        var s8 = 0.0;
+        var s9 = 0.0;
+        var s10 = 0.0;
+        var s11 = 0.0;
+        var s12 = 0.0;
+        var s13 = 0.0;
+        var s14 = 0.0;
+        var s15 = 0.0;
         var b = lane / LANES;
         for (; b < n; b += step) {
             let u = unpack(first + b, part);
@@ -87,6 +95,30 @@ fn main(
             if live > 7u {
                 s7 += share(u, (start + t0 + 7u) * n + b, part);
             }
+            if live > 8u {
+                s8 += share(u, (start + t0 + 8u) * n + b, part);
+            }
+            if live > 9u {
+                s9 += share(u, (start + t0 + 9u) * n + b, part);
+            }
+            if live > 10u {
+                s10 += share(u, (start + t0 + 10u) * n + b, part);
+            }
+            if live > 11u {
+                s11 += share(u, (start + t0 + 11u) * n + b, part);
+            }
+            if live > 12u {
+                s12 += share(u, (start + t0 + 12u) * n + b, part);
+            }
+            if live > 13u {
+                s13 += share(u, (start + t0 + 13u) * n + b, part);
+            }
+            if live > 14u {
+                s14 += share(u, (start + t0 + 14u) * n + b, part);
+            }
+            if live > 15u {
+                s15 += share(u, (start + t0 + 15u) * n + b, part);
+            }
         }
         let r0 = subgroupAdd(s0);
         let r1 = subgroupAdd(s1);
@@ -96,6 +128,14 @@ fn main(
         let r5 = subgroupAdd(s5);
         let r6 = subgroupAdd(s6);
         let r7 = subgroupAdd(s7);
+        let r8 = subgroupAdd(s8);
+        let r9 = subgroupAdd(s9);
+        let r10 = subgroupAdd(s10);
+        let r11 = subgroupAdd(s11);
+        let r12 = subgroupAdd(s12);
+        let r13 = subgroupAdd(s13);
+        let r14 = subgroupAdd(s14);
+        let r15 = subgroupAdd(s15);
         if lane == 0u {
             y[t0 * shape.stride + out] = r0;
             if live > 1u {
@@ -118,6 +158,30 @@ fn main(
             }
             if live > 7u {
                 y[(t0 + 7u) * shape.stride + out] = r7;
+            }
+            if live > 8u {
+                y[(t0 + 8u) * shape.stride + out] = r8;
+            }
+            if live > 9u {
+                y[(t0 + 9u) * shape.stride + out] = r9;
+            }
+            if live > 10u {
+                y[(t0 + 10u) * shape.stride + out] = r10;
+            }
+            if live > 11u {
+                y[(t0 + 11u) * shape.stride + out] = r11;
+            }
+            if live > 12u {
+                y[(t0 + 12u) * shape.stride + out] = r12;
+            }
+            if live > 13u {
+                y[(t0 + 13u) * shape.stride + out] = r13;
+            }
+            if live > 14u {
+                y[(t0 + 14u) * shape.stride + out] = r14;
+            }
+            if live > 15u {
+                y[(t0 + 15u) * shape.stride + out] = r15;
             }
         }
     }
