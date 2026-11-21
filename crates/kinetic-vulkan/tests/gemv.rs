@@ -227,6 +227,24 @@ fn q8_0_prompt_pass_has_the_same_bits() {
     check_prompt_pass(TensorType::Q8_0, 37, 2 * 256, 32, 21);
 }
 
+// Every block type a GEMV takes survives a prompt pass bit for bit, whether
+// or not it has a kernel of its own for many tokens: a type added without
+// one still runs the GEMV it always ran, and one whose kernel drifts is
+// caught here rather than in a benchmark.
+#[test]
+fn every_gemv_type_survives_a_prompt_pass() {
+    for ty in [
+        TensorType::F32,
+        TensorType::F16,
+        TensorType::Q8_0,
+        TensorType::Q4K,
+        TensorType::Q5K,
+        TensorType::Q6K,
+    ] {
+        check_prompt_pass(ty, 37, 3 * 256, 40, 33);
+    }
+}
+
 #[test]
 fn q4_k_matches_reference() {
     check(TensorType::Q4K, 37, 5 * 256);
