@@ -367,19 +367,12 @@ impl Kernels {
     /// workgroups takes; with `many`, the one written for a pass of many
     /// tokens, where the driver has it.
     fn gemv_kernel(&self, ty: TensorType, many: bool) -> (&Rc<Kernel>, usize) {
-        #[cfg(metal_driver)]
         if many {
             match ty {
                 TensorType::Q4K => return (&self.gemv_q4_k_many, MANY_ROWS_PER_GROUP),
                 TensorType::Q5K => return (&self.gemv_q5_k_many, MANY_ROWS_PER_GROUP),
                 TensorType::Q6K => return (&self.gemv_q6_k_many, MANY_ROWS_PER_GROUP),
                 _ => {}
-            }
-        }
-        #[cfg(not(metal_driver))]
-        {
-            if many && ty == TensorType::Q4K {
-                return (&self.gemv_q4_k_many, MANY_ROWS_PER_GROUP);
             }
         }
         let kernel = match ty {

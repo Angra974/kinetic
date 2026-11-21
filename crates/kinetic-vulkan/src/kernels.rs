@@ -36,9 +36,7 @@ pub struct Kernels {
     pub(crate) gemv_q4_k: Rc<Kernel>,
     /// The same sums for a pass of many tokens; see `shaders/gemv_many.wgsl`.
     pub(crate) gemv_q4_k_many: Rc<Kernel>,
-    #[cfg(metal_driver)]
     pub(crate) gemv_q5_k_many: Rc<Kernel>,
-    #[cfg(metal_driver)]
     pub(crate) gemv_q6_k_many: Rc<Kernel>,
     pub(crate) gemv_q5_k: Rc<Kernel>,
     pub(crate) gemv_q6_k: Rc<Kernel>,
@@ -76,6 +74,10 @@ impl Kernels {
                 "gemv_q4_k_many",
                 include_bytes!("../shaders/metal/gemv_q4_k_many.metal"),
             )?,
+            #[cfg(not(metal_driver))]
+            gemv_q5_k_many: gemv("gemv_q5_k_many", spirv!("gemv_q5_k_many"))?,
+            #[cfg(not(metal_driver))]
+            gemv_q6_k_many: gemv("gemv_q6_k_many", spirv!("gemv_q6_k_many"))?,
             #[cfg(metal_driver)]
             gemv_q5_k_many: gemv(
                 "gemv_q5_k_many",
