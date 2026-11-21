@@ -98,9 +98,9 @@ pub const API: &str = "Metal";
 /// Most tokens worth running as one prompt pass, or 0 for a driver with no
 /// kernels of its own for such passes; see [`Commands::set_prompt`].
 #[cfg(not(metal_driver))]
-pub const PROMPT_BATCH: usize = 64;
+pub const PROMPT_BATCH: usize = 128;
 #[cfg(metal_driver)]
-pub const PROMPT_BATCH: usize = 64;
+pub const PROMPT_BATCH: usize = 128;
 
 pub use attention::{AttentionGate, AttentionShape, KvCache, QkvConsts};
 pub use batch::{Batch, BATCH_HEADER};
