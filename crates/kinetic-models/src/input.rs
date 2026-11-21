@@ -178,6 +178,7 @@ mod tests {
                 experts: None,
                 ffn_out_norm: None,
                 residual_scale: None,
+                out_scale: None,
             }],
             mtp: None,
             grid_rope,

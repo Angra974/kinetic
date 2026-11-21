@@ -52,6 +52,7 @@ pub struct Kernels {
     pub(crate) attend_64: Rc<Kernel>,
     pub(crate) attend_128: Rc<Kernel>,
     pub(crate) attend_256: Rc<Kernel>,
+    pub(crate) attend_512: Rc<Kernel>,
     read_sum: Rc<Kernel>,
     /// The batch words of a pass of one token, for GEMVs outside a model.
     pub(crate) single: DeviceBuffer<u32>,
@@ -91,7 +92,7 @@ impl Kernels {
             gemv_q5_k: gemv("gemv_q5_k", spirv!("gemv_q5_k"))?,
             gemv_q6_k: gemv("gemv_q6_k", spirv!("gemv_q6_k"))?,
             quantize_q8: Kernel::new(device, "quantize_q8", spirv!("quantize_q8"), 3, 1)?,
-            norm: Kernel::new(device, "norm", spirv!("norm"), 8, 4)?,
+            norm: Kernel::new(device, "norm", spirv!("norm"), 8, 5)?,
             swiglu: Kernel::new(device, "swiglu", spirv!("swiglu"), 5, 1)?,
             argmax: Kernel::new(device, "argmax", spirv!("argmax"), 3, 1)?,
             rope: Kernel::new(device, "rope", spirv!("rope"), 5, 13)?,
@@ -102,6 +103,7 @@ impl Kernels {
             attend_64: attend("attend_64", spirv!("attend_64"))?,
             attend_128: attend("attend_128", spirv!("attend_128"))?,
             attend_256: attend("attend_256", spirv!("attend_256"))?,
+            attend_512: attend("attend_512", spirv!("attend_512"))?,
             read_sum: Kernel::new(device, "read_sum", spirv!("read_sum"), 2, 1)?,
             single: DeviceBuffer::from_slice(device, &[1, 0, 0, 1])?,
         })

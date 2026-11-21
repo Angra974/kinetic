@@ -52,6 +52,7 @@ pub(super) struct VulkanLayer {
     ffn: VulkanFfn,
     ffn_out_norm: Option<DeviceBuffer<f32>>,
     residual_scale: f32,
+    out_scale: f32,
 }
 
 impl VulkanLayer {
@@ -80,6 +81,7 @@ impl VulkanLayer {
             ffn: VulkanFfn::upload(gpu, ffn)?,
             ffn_out_norm: optional(&l.ffn_out_norm)?,
             residual_scale: l.residual_scale.unwrap_or(1.0),
+            out_scale: l.out_scale.unwrap_or(1.0),
         })
     }
 
@@ -166,15 +168,16 @@ impl VulkanLayer {
             _ => unreachable!("state does not belong to this layer"),
         }?;
         let k = &gpu.kernels;
-        let add = |post: Option<&'a DeviceBuffer<f32>>| Residual {
+        let add = |post: Option<&'a DeviceBuffer<f32>>, out_scale: f32| Residual {
             y: &w.y,
             post,
             scale: self.residual_scale,
+            out_scale,
         };
-        let mixed = add(self.mixer_out_norm.as_ref());
+        let mixed = add(self.mixer_out_norm.as_ref(), 1.0);
         k.norm(&w.batch, &w.x, Some(mixed), &self.ffn_norm, eps, &w.h, c)?;
         self.ffn.record(gpu, w, c)?;
-        let fed = add(self.ffn_out_norm.as_ref());
+        let fed = add(self.ffn_out_norm.as_ref(), self.out_scale);
         k.norm(&w.batch, &w.x, Some(fed), next, eps, &w.h, c)
     }
 

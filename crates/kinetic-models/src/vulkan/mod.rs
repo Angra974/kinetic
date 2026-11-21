@@ -120,6 +120,8 @@ pub struct VulkanModel<'m> {
     eps: f32,
     embd: Matrix<'m>,
     embd_scale: Option<f32>,
+    /// Softens the logits this model gives out, as its file asks.
+    logit_cap: Option<f32>,
     output: DeviceMatrix,
     /// The output head as the model file holds it, for drafts.
     output_rows: Matrix<'m>,
@@ -202,9 +204,9 @@ impl<'m> VulkanModel<'m> {
                 "weights stored folded are not supported on Vulkan yet".into(),
             ));
         }
-        if model.per_layer.is_some() || model.logit_cap.is_some() {
+        if model.per_layer.is_some() {
             return Err(LoadError(
-                "per-layer inputs and capped logits are not supported on Vulkan yet".into(),
+                "per-layer inputs are not supported on Vulkan yet".into(),
             ));
         }
         let e = &model.embd;
@@ -233,6 +235,7 @@ impl<'m> VulkanModel<'m> {
             eps: model.eps,
             embd: model.embd,
             embd_scale: model.embd_scale,
+            logit_cap: model.logit_cap,
             output: gpu.matrix(&model.output)?,
             output_rows: model.output,
             mtp,
@@ -557,7 +560,15 @@ impl<'m> VulkanModel<'m> {
             }
             if logits {
                 let rows = &w.logits_host.as_slice()[..head.len() * vocab];
+                let start = out.logits.len();
                 out.logits.extend_from_slice(rows);
+                // The cap only keeps the device's greedy token, which tanh
+                // leaves alone, so it is applied to the rows that leave.
+                if let Some(cap) = self.logit_cap {
+                    out.logits[start..]
+                        .iter_mut()
+                        .for_each(|l| *l = cap * (*l / cap).tanh());
+                }
             }
             state.pos += n;
             done += n;
