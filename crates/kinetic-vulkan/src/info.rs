@@ -72,6 +72,9 @@ pub struct DeviceInfo {
     pub driver_info: String,
     /// Size of the largest device-local memory heap.
     pub device_local_bytes: u64,
+    /// Bytes free in that heap, as `VK_EXT_memory_budget` reports them;
+    /// `None` when the driver reports none.
+    pub device_local_free: Option<u64>,
     /// The largest storage buffer a kernel can bind.
     pub max_buffer_bytes: u64,
     /// Seconds per timestamp tick.
@@ -130,6 +133,7 @@ mod tests {
             driver_name: String::new(),
             driver_info: String::new(),
             device_local_bytes: 0,
+            device_local_free: None,
             max_buffer_bytes: 0,
             timestamp_period: 1.0,
             features,

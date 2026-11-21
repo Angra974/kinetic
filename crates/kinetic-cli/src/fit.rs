@@ -5,7 +5,9 @@ use std::io::Write;
 use std::path::Path;
 
 use kinetic_gguf::{Gguf, GgufFile};
+use kinetic_quant::TensorType;
 
+use crate::gpu::VULKAN;
 use crate::library::{self, Local};
 use crate::system::{self, Gpu};
 use crate::Result;
@@ -30,6 +32,9 @@ pub struct Weights {
     experts: u64,
     /// Experts' bytes one token reads.
     active_experts: u64,
+    /// The first weight type Vulkan has no kernel for, so the model runs on
+    /// the CPU there.
+    vulkan_gap: Option<TensorType>,
 }
 
 impl Weights {
@@ -51,10 +56,19 @@ impl Weights {
         let n = |key| g.arch_key(key).and_then(|v| v.as_u64()).unwrap_or(0);
         let (count, used) = (n("expert_count"), n("expert_used_count"));
         let active_experts = (experts * used).checked_div(count).unwrap_or(experts);
+        #[cfg(feature = "vulkan")]
+        let vulkan_gap = g
+            .tensors
+            .iter()
+            .map(|t| t.ty)
+            .find(|&ty| !kinetic_vulkan::has_gemv_kernel(ty));
+        #[cfg(not(feature = "vulkan"))]
+        let vulkan_gap = None;
         Weights {
             dense,
             experts,
             active_experts,
+            vulkan_gap,
         }
     }
 
@@ -67,7 +81,7 @@ impl Weights {
     }
 }
 
-/// What decode speed depends on here: the CUDA GPU with the most free
+/// What decode speed depends on here: the usable GPU with the most free
 /// memory, as (free bytes, bandwidth), and the RAM's measured bandwidth.
 pub struct Speeds {
     gpu: Option<(u64, f64)>,
@@ -76,8 +90,14 @@ pub struct Speeds {
 
 impl Speeds {
     pub fn measure(gpus: &[Gpu]) -> Speeds {
-        let gpu = best_cuda(gpus)
-            .and_then(|g| Some((g.memory_free.unwrap_or(g.memory_total), g.bandwidth?)));
+        let gpu = best_gpu(gpus).and_then(|g| {
+            // CUDA reports a nominal figure; Vulkan has none, so it is measured.
+            let bandwidth = match g.api {
+                "CUDA" => g.bandwidth?,
+                _ => system::vulkan_bandwidth(&g.name)?,
+            };
+            Some((g.memory_free.unwrap_or(g.memory_total), bandwidth))
+        });
         Speeds {
             gpu,
             cpu_bandwidth: system::memory_bandwidth(),
@@ -91,6 +111,7 @@ impl Speeds {
             dense: bytes,
             experts: 0,
             active_experts: 0,
+            vulkan_gap: None,
         };
         place(&w, self.gpu, self.cpu_bandwidth)
     }
@@ -101,17 +122,23 @@ impl Speeds {
     }
 }
 
-fn best_cuda(gpus: &[Gpu]) -> Option<&Gpu> {
+/// The GPU models run on: CUDA before Vulkan, then the one with the most
+/// free memory. Devices Kinetic cannot use are not candidates, and neither
+/// is an integrated GPU, whose memory is the system's RAM: models run from
+/// VRAM or not at all.
+fn best_gpu(gpus: &[Gpu]) -> Option<&Gpu> {
     gpus.iter()
-        .filter(|g| g.api == "CUDA")
-        .max_by_key(|g| g.memory_free.unwrap_or(g.memory_total))
+        .filter(|g| {
+            g.problem.is_none() && g.discrete && matches!(g.api, "CUDA" | VULKAN)
+        })
+        .max_by_key(|g| (g.api == "CUDA", g.memory_free.unwrap_or(g.memory_total)))
 }
 
 /// Bytes a model may take here with room left for its context, and where:
-/// the free memory of the CUDA GPU, else half the available RAM, as the
-/// rest of the system needs some too.
+/// the free memory of the GPU, else half the available RAM, as the rest of
+/// the system needs some too.
 pub fn room(gpus: &[Gpu]) -> (u64, &'static str) {
-    match best_cuda(gpus).and_then(|g| g.memory_free) {
+    match best_gpu(gpus).and_then(|g| g.memory_free) {
         Some(free) => (free.saturating_sub(HEADROOM), "on the GPU"),
         None => (system::machine().ram_available / 2, "in memory"),
     }
@@ -199,18 +226,26 @@ pub fn run(target: Option<&Path>, list: &[usize]) -> Result<()> {
     };
     let machine = system::machine();
     let (gpus, _) = system::gpus();
-    let (speeds, gpu_name) = match list {
-        [] => (
-            Speeds::measure(&gpus),
-            best_cuda(&gpus).map(|g| g.name.clone()),
-        ),
+    let (speeds, gpu_name, cuda) = match list {
+        [] => {
+            let gpu = best_gpu(&gpus);
+            (
+                Speeds::measure(&gpus),
+                gpu.map(|g| g.name.clone()),
+                gpu.is_some_and(|g| g.api == "CUDA"),
+            )
+        }
         _ => {
             let cuda: Vec<&Gpu> = gpus.iter().filter(|g| g.api == "CUDA").collect();
             let names: Vec<String> = list
                 .iter()
                 .filter_map(|&i| cuda.get(i).map(|g| format!("GPU {i} {}", g.name)))
                 .collect();
-            (Speeds::measure_over(&gpus, list)?, Some(names.join(" + ")))
+            (
+                Speeds::measure_over(&gpus, list)?,
+                Some(names.join(" + ")),
+                true,
+            )
         }
     };
 
@@ -241,12 +276,18 @@ pub fn run(target: Option<&Path>, list: &[usize]) -> Result<()> {
             }
             (_, Err(e)) => format!("{:>9}  unreadable: {e}", ""),
             (_, Ok(w)) => {
-                let (on, lo, hi) = place(&w, speeds.gpu, speeds.cpu_bandwidth);
+                // a Vulkan device cannot upload a weight type it has no kernel for
+                let gap = if cuda { None } else { w.vulkan_gap };
+                let gpu = if gap.is_some() { None } else { speeds.gpu };
+                let (on, lo, hi) = place(&w, gpu, speeds.cpu_bandwidth);
                 let size = (w.dense + w.experts) as f64 / GIB;
-                let mut note = String::new();
-                if on == "CPU" && w.dense + w.experts > machine.ram_available {
-                    note = ", more than the free memory: reads from disk, much slower".into();
-                }
+                let note = match gap {
+                    Some(ty) => format!(", Vulkan has no kernel for {ty}"),
+                    None if on == "CPU" && w.dense + w.experts > machine.ram_available => {
+                        ", more than the free memory: reads from disk, much slower".into()
+                    }
+                    None => String::new(),
+                };
                 format!("{size:>5.2} GiB  {on:<20}  {lo:.0}-{hi:.0} t/s{note}",)
             }
         };
@@ -254,16 +295,17 @@ pub fn run(target: Option<&Path>, list: &[usize]) -> Result<()> {
     }
     let gpu_note = match (gpu_name, speeds.gpu) {
         (Some(name), Some((free, bw))) => format!(
-            "{name} with {:.1} GiB free at {:.0} GB/s nominal",
+            "{name} with {:.1} GiB free at {:.0} GB/s {}",
             free as f64 / GIB,
-            bw / 1e9
+            bw / 1e9,
+            if cuda { "nominal" } else { "measured" }
         ),
-        _ => "no CUDA GPU".into(),
+        _ => "no usable GPU".into(),
     };
     writeln!(out)?;
     writeln!(
         out,
-        "Estimates from each model's size and memory bandwidth ({gpu_note}; RAM {:.0} GB/s measured), not measurements; `kinetic bench` measures.",
+        "Decode estimates from each model's size and the bandwidths above ({gpu_note}; RAM {:.0} GB/s); `kinetic bench` measures real decode speed.",
         speeds.cpu_bandwidth / 1e9
     )?;
     Ok(())
@@ -281,6 +323,7 @@ mod tests {
             dense: 2 * GB,
             experts: 0,
             active_experts: 0,
+            vulkan_gap: None,
         };
         let gpu = Some((6 * GB, 300e9));
         let (on, lo, hi) = place(&w, gpu, 50e9);
@@ -300,6 +343,7 @@ mod tests {
             dense: GB,
             experts: 12 * GB,
             active_experts: GB,
+            vulkan_gap: None,
         };
         let (on, lo, hi) = place(&w, Some((6 * GB, 300e9)), 50e9);
         assert_eq!(on, "GPU, experts on CPU");

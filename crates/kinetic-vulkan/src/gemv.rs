@@ -38,6 +38,12 @@ fn block_len(ty: TensorType) -> Option<usize> {
     })
 }
 
+/// Whether a GEMV kernel exists for weight type `ty`; a model with any
+/// other type cannot be uploaded to a Vulkan device.
+pub fn has_gemv_kernel(ty: TensorType) -> bool {
+    block_len(ty).is_some()
+}
+
 /// A weight matrix in device memory, laid out for the GEMV kernels.
 pub struct DeviceMatrix {
     ty: TensorType,

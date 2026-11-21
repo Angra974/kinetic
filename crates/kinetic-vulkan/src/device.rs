@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::rc::Rc;
 
 use ash::vk;
@@ -23,6 +24,8 @@ pub struct Device {
     pub(crate) push: ash::khr::push_descriptor::Device,
     queue: vk::Queue,
     pool: vk::CommandPool,
+    /// Bytes of this device's allocations that live in the system's memory.
+    host_bytes: Cell<u64>,
 }
 
 impl Device {
@@ -77,6 +80,7 @@ impl Device {
             push,
             queue,
             pool,
+            host_bytes: Cell::new(0),
         }))
     }
 
@@ -205,6 +209,30 @@ impl Device {
             flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL) != prefer_local
         });
         types
+    }
+
+    /// Bytes of this device's allocations that live in the system's memory,
+    /// which a discrete GPU takes only as relief for a full VRAM; see
+    /// `HOST_SPILL`.
+    pub(crate) fn host_bytes(&self) -> u64 {
+        self.host_bytes.get()
+    }
+
+    pub(crate) fn add_host_bytes(&self, bytes: u64) {
+        self.host_bytes.set(self.host_bytes.get() + bytes);
+    }
+
+    pub(crate) fn sub_host_bytes(&self, bytes: u64) {
+        self.host_bytes.set(self.host_bytes.get().saturating_sub(bytes));
+    }
+
+    /// Whether memory type `ty` lives in the device's own memory, its VRAM,
+    /// rather than in the system's that it reaches over the bus.
+    pub(crate) fn is_device_local(&self, ty: u32) -> bool {
+        let memory = &self.physical.memory;
+        memory.memory_types[ty as usize]
+            .property_flags
+            .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
     }
 
     /// The size of the heap that memory type `ty` allocates from.

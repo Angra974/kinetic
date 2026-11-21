@@ -122,12 +122,26 @@ impl PhysicalDevice {
         }
 
         let heaps = &memory.memory_heaps[..memory.memory_heap_count as usize];
-        let device_local_bytes = heaps
+        let largest = heaps
             .iter()
-            .filter(|h| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
-            .map(|h| h.size)
-            .max()
-            .unwrap_or(0);
+            .enumerate()
+            .filter(|(_, h)| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+            .max_by_key(|(_, h)| h.size);
+        let device_local_bytes = largest.map_or(0, |(_, h)| h.size);
+        // `VK_EXT_memory_budget` fills `budget` and `usage` without allocating
+        // any memory. RADV reports this device extension even though it is not
+        // enabled here; a driver that does not support it leaves both zero.
+        let mut budget = vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
+        let mut mem2 = vk::PhysicalDeviceMemoryProperties2::default().push_next(&mut budget);
+        // SAFETY: `raw` belongs to this instance, and `mem2` links only
+        // `budget`, which outlives the call.
+        unsafe { vk_instance.get_physical_device_memory_properties2(raw, &mut mem2) };
+        let device_local_free = largest.and_then(|(heap, _)| {
+            match (budget.heap_budget[heap], budget.heap_usage[heap]) {
+                (0, 0) => None,
+                (budget, usage) => Some(budget.saturating_sub(usage)),
+            }
+        });
         let info = DeviceInfo {
             name: c_text(props.device_name_as_c_str()),
             kind: kind(props.device_type),
@@ -141,6 +155,7 @@ impl PhysicalDevice {
             driver_name,
             driver_info,
             device_local_bytes,
+            device_local_free,
             max_buffer_bytes: props.limits.max_storage_buffer_range.into(),
             timestamp_period: f64::from(props.limits.timestamp_period) * 1e-9,
             features,

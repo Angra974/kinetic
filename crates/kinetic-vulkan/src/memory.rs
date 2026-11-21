@@ -10,6 +10,10 @@ use crate::error::{Check, Error, Result};
 
 /// Host-visible bounce buffer size for copies to and from device memory.
 const STAGING_BYTES: usize = 64 << 20;
+/// Most system memory a discrete GPU may take as relief for a full VRAM.
+/// Models belong in VRAM; past this, an allocation fails rather than
+/// creeping further into RAM.
+const HOST_SPILL: u64 = 10 << 30;
 
 mod sealed {
     pub trait Sealed {}
@@ -33,6 +37,8 @@ pub(crate) struct Allocation {
     device: Rc<Device>,
     pub(crate) buffer: vk::Buffer,
     memory: vk::DeviceMemory,
+    /// Bytes it takes from the system's memory, when it lives there.
+    host: Option<u64>,
 }
 
 impl Allocation {
@@ -56,12 +62,22 @@ impl Allocation {
             device: Rc::clone(device),
             buffer,
             memory: vk::DeviceMemory::null(),
+            host: None,
         };
         // SAFETY: `buffer` belongs to this device.
         let needs = unsafe { raw.get_buffer_memory_requirements(buffer) };
+        // A discrete GPU keeps models in its VRAM and takes system memory
+        // only as relief for a full one, up to [`HOST_SPILL`].
+        let spill = prefer_local
+            && required.is_empty()
+            && device.info().kind == crate::DeviceKind::Discrete;
         let mut last = vk::Result::ERROR_OUT_OF_DEVICE_MEMORY;
         for ty in device.memory_types(needs.memory_type_bits, required, prefer_local) {
             if device.heap_size(ty) < needs.size {
+                continue;
+            }
+            let local = device.is_device_local(ty);
+            if spill && !local && device.host_bytes() + needs.size > HOST_SPILL {
                 continue;
             }
             let info = vk::MemoryAllocateInfo::default()
@@ -71,6 +87,10 @@ impl Allocation {
             match unsafe { raw.allocate_memory(&info, None) } {
                 Ok(memory) => {
                     alloc.memory = memory;
+                    if spill && !local {
+                        device.add_host_bytes(needs.size);
+                        alloc.host = Some(needs.size);
+                    }
                     // SAFETY: fresh memory of the required size and type.
                     unsafe { raw.bind_buffer_memory(buffer, memory, 0) }
                         .check("vkBindBufferMemory")?;
@@ -97,6 +117,9 @@ impl Allocation {
 
 impl Drop for Allocation {
     fn drop(&mut self) {
+        if let Some(bytes) = self.host {
+            self.device.sub_host_bytes(bytes);
+        }
         // SAFETY: work using the buffer was waited for by whoever submitted it.
         unsafe {
             self.device.raw.destroy_buffer(self.buffer, None);

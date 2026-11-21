@@ -52,6 +52,7 @@ impl PhysicalDevice {
             driver_name: "Metal".into(),
             driver_info: String::new(),
             device_local_bytes: raw.recommendedMaxWorkingSetSize(),
+            device_local_free: None,
             max_buffer_bytes: raw.maxBufferLength() as u64,
             timestamp_period: 0.0,
             features,

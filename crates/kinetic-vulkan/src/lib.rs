@@ -108,7 +108,7 @@ pub use commands::{Commands, Graph, Timestamp, Timings};
 pub use delta_net::{DeltaShape, DeltaState, DeltaWeights};
 pub use device::Device;
 pub use error::{Error, Result};
-pub use gemv::{DeviceMatrix, GemvInput, Out, Rows};
+pub use gemv::{has_gemv_kernel, DeviceMatrix, GemvInput, Out, Rows};
 pub use info::{DeviceInfo, DeviceKind, Features};
 pub use instance::Instance;
 pub use kernels::Kernels;

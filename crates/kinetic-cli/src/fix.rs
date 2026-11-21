@@ -8,7 +8,11 @@ pub fn for_error(msg: &str) -> Option<&'static str> {
         "another program may be using that port; pick a free one with --port N"
     } else if has(&["out_of_memory", "out of memory", "no layer fits"]) {
         "try a smaller model or quantization, a shorter context such as -c 4096, or --device cpu"
-    } else if has(&["cuda driver", "built without", "vulkan loader"]) {
+    } else if has(&["built without cuda"]) {
+        "this build has no CUDA support; use --device vulkan or --device cpu, or rebuild with --features cuda"
+    } else if has(&["built without vulkan"]) {
+        "this build has no Vulkan support; use --device cuda or --device cpu, or rebuild with --features vulkan"
+    } else if has(&["cuda driver", "vulkan loader"]) {
         "install or update the GPU driver, or run on the processor with --device cpu"
     } else if has(&["is not supported yet", "does not name its architecture"]) {
         "`kinetic models` shows which of your models run; `kinetic` alone suggests one that does"
@@ -51,6 +55,8 @@ mod tests {
             ),
             ("no layer fits on the device", "-c 4096"),
             ("CUDA driver not found: nvcuda.dll is missing", "GPU driver"),
+            ("this kinetic was built without CUDA", "--device vulkan"),
+            ("this kinetic was built without Vulkan", "--device cuda"),
             (
                 "cannot listen on 127.0.0.1:8080: address in use (os error 10048)",
                 "--port",
