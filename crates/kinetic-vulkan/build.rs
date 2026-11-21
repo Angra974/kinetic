@@ -16,6 +16,11 @@ const KERNELS: &[(&str, &str, &[&str])] = &[
     ("gemv_f16", "", &["gemv", "gemv_f16"]),
     ("gemv_q8_0", "", &["gemv", "gemv_q8_0"]),
     ("gemv_q4_k", "", &["gemv", "k4", "gemv_q4_k"]),
+    (
+        "gemv_q4_k_many",
+        "",
+        &["gemv_many", "k4", "gemv_q4_k_many"],
+    ),
     ("gemv_q5_k", "", &["gemv", "k4", "gemv_q5_k"]),
     ("gemv_q6_k", "", &["gemv", "gemv_q6_k"]),
     ("quantize_q8", "", &["quantize_q8"]),
