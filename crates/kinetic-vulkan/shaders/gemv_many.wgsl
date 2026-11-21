@@ -25,7 +25,7 @@ var<immediate> shape: Shape;
 @group(0) @binding(5) var<storage, read> batch: array<u32>;
 
 const ROWS_PER_GROUP: u32 = 4u;
-const TOKENS: u32 = 4u;
+const TOKENS: u32 = 8u;
 const NIBBLES: u32 = 0x0F0F0F0Fu;
 
 @compute @workgroup_size(128)
@@ -58,6 +58,10 @@ fn main(
         var s1 = 0.0;
         var s2 = 0.0;
         var s3 = 0.0;
+        var s4 = 0.0;
+        var s5 = 0.0;
+        var s6 = 0.0;
+        var s7 = 0.0;
         var b = lane / LANES;
         for (; b < n; b += step) {
             let u = unpack(first + b, part);
@@ -71,11 +75,27 @@ fn main(
             if live > 3u {
                 s3 += share(u, (start + t0 + 3u) * n + b, part);
             }
+            if live > 4u {
+                s4 += share(u, (start + t0 + 4u) * n + b, part);
+            }
+            if live > 5u {
+                s5 += share(u, (start + t0 + 5u) * n + b, part);
+            }
+            if live > 6u {
+                s6 += share(u, (start + t0 + 6u) * n + b, part);
+            }
+            if live > 7u {
+                s7 += share(u, (start + t0 + 7u) * n + b, part);
+            }
         }
         let r0 = subgroupAdd(s0);
         let r1 = subgroupAdd(s1);
         let r2 = subgroupAdd(s2);
         let r3 = subgroupAdd(s3);
+        let r4 = subgroupAdd(s4);
+        let r5 = subgroupAdd(s5);
+        let r6 = subgroupAdd(s6);
+        let r7 = subgroupAdd(s7);
         if lane == 0u {
             y[t0 * shape.stride + out] = r0;
             if live > 1u {
@@ -86,6 +106,18 @@ fn main(
             }
             if live > 3u {
                 y[(t0 + 3u) * shape.stride + out] = r3;
+            }
+            if live > 4u {
+                y[(t0 + 4u) * shape.stride + out] = r4;
+            }
+            if live > 5u {
+                y[(t0 + 5u) * shape.stride + out] = r5;
+            }
+            if live > 6u {
+                y[(t0 + 6u) * shape.stride + out] = r6;
+            }
+            if live > 7u {
+                y[(t0 + 7u) * shape.stride + out] = r7;
             }
         }
     }
