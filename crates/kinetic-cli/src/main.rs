@@ -57,7 +57,7 @@ const WARM_DISK: u64 = 2 << 30;
 #[derive(Parser)]
 #[command(
     name = "kinetic",
-    version,
+    version = env!("KINETIC_VERSION"),
     about = "Run language models on your own computer."
 )]
 struct Cli {

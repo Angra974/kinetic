@@ -23,6 +23,10 @@ Windows, and into `~/.local/bin` on Linux and macOS. `-Version 0.1.0` /
 `--version 0.1.0` picks a release and `-Cpu` / `--cpu` the smaller CPU-only
 build. macOS has one build, which uses the GPU through Metal.
 
+`-Nightly` / `--nightly` installs the nightly build instead: main as it was
+last night, untested, for trying a fix before the next release. `kinetic
+--version` then says which night and commit it is.
+
 ## Release binaries
 
 From the [releases page](https://github.com/Veloresearch/kinetic/releases),
