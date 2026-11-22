@@ -1,146 +1,161 @@
-# PLAN — journal de campagne de performance
+# PLAN — journal de comblement des lacunes de Kinetic face à llama.cpp
 
-> Compagnon de `llama-kinetic.md` (§7.10 protocole, §7.12 artefacts).
-> Une ligne par essai : hypothèse, configuration, mesure, verdict, raison.
-> Aucun chiffre sans commande, commit et date.
+> Compagnon de `llama-kinetic.md` (§4 matrice, §6 lots, §7 modules, §10 annexes).
+> Le document dit **où** Kinetic est en retard et dans quel ordre attaquer ; ce journal
+> dit **ce qui a été comblé**, avec quelle preuve, et ce qui reste.
+> Une entrée n'est close que par une preuve : une capacité de llama.cpp qui réussit
+> maintenant dans Kinetic, sur la même machine et le même fichier.
 
 ---
 
-## 1. Machine et état
+## 1. Ce qu'on comble
+
+La cible est la liste des capacités de llama.cpp, pas la liste de nos modèles. Les
+conséquences — charger `qwen3moe`, `qwen3vl`, `tekken`, un PTQ1_0, et s'approcher des
+débits de llama — découlent du comblement, elles ne le remplacent pas.
+
+**Preuve d'une lacune comblée**, selon le domaine :
+
+| Domaine | Preuve exigée |
+|---|---|
+| Format / backend | `kinetic info` + `kinetic run` sur le même GGUF que llama, sur le GPU (jamais de repli CPU), sortie non dégénérée |
+| Architecture | idem, plus `kinetic info` qui nomme la famille, et le prompt de contrôle |
+| Performance | même fichier, même backend, `kinetic bench --prompt` contre `llama-bench`, un harnais par comparaison |
+| Tokenizer | `kinetic tokenize` (ou l'équivalent) donne les mêmes ids que `llama-tokenize` sur un corpus de contrôle |
+| API / serveur | la requête llama.cpp passe sans modification, champs inconnus ignorés ou refusés clairement |
+| Outillage | la commande équivalente existe et produit un artefact comparable (`quantize`, `imatrix`, `split`) |
+
+Une entrée close sans preuve reproductible est rouverte.
+
+## 2. Machine et état
 
 | Élément | Valeur (relevé du 22 nov. 2026) |
 |---|---|
 | CPU | AMD Ryzen 7 7800X3D, 8 cœurs / 16 threads, AVX2, FMA, F16C |
-| GPU | AMD Radeon RX 9070 XT, `gfx1201` (RDNA 4), 64 CU, 16 Gio, wavefront 32 |
+| GPU | AMD Radeon RX 9070 XT, `gfx1201` (RDNA 4), 64 CU, 16 Gio |
 | iGPU | AMD Radeon 610M, `gfx1036`, 2 CU, mémoire partagée |
-| Vulkan | 1.4.354, RADV / Mesa 26.1.6, sous-groupe par défaut 64, plage 32–64 |
+| Vulkan | 1.4.354, RADV / Mesa 26.1.6, sous-groupe 32–64 |
 | ROCm | 7.2.0, HIP 7.2, `hipcc` ciblant `gfx1201` |
-| CUDA | absent (aucun GPU NVIDIA) |
-| llama.cpp mesuré | `build-vulkan/bin/llama-bench` (Vulkan0) |
+| CUDA | absent |
+| llama.cpp de référence | `build-vulkan/bin/llama-bench` (Vulkan0) |
 
-Dépôt de travail : le fork `Angra974/kinetic`, remote `fork`. `main` porte ce journal et
-l'analyse `llama-kinetic.md` ; la branche `vulkan-work` porte les noyaux et les mesures
-(commits `0127427` et `85d29aa`). `upstream` (`Veloresearch/kinetic`) n'est que l'amont :
-on y lit les nouveautés, on n'y pousse pas. Les deux branches partent de `f3723b1`.
+Dépôt : fork `Angra974/kinetic`, remote `fork`, branche unique `main`. `upstream`
+(`Veloresearch/kinetic`) est l'amont, en lecture seule.
 
-## 2. Protocole
+Matrice de capacités de référence : `llama-kinetic.md` §4 (architectures, tokenizers,
+formats, backends, serveur, sampling, spéculatif, outils, bindings, modalités).
 
-- Un backend par comparaison : `kinetic` Vulkan contre `llama-bench` Vulkan0, jamais
-  de mélange avec ROCm ou CUDA.
-- Machine idle, même fichier GGUF, un seul changement par essai.
-- Préfill : `python3 scripts/bench_protocol.py '<modèle>' --llama-bin <llama-bench>`
-  (écrit un CSV horodaté avec le commit ; kinetic y enregistre pp512/pp2048, llama
-  pp512/pp2048/tg128).
-- Décodage : `./target/release/kinetic bench '<modèle>' -r 5` (le protocole
-  n'enregistre pas tg côté kinetic).
+## 3. Protocole
+
+- Un backend par comparaison, jamais de mélange (§7.10 du document).
+- Protocole des essais de performance : `python3 scripts/bench_protocol.py '<modèle>'
+  --llama-bin <llama-bench>` pour le préfill, `kinetic bench -r 5` pour le décodage.
 - Exactitude : `cargo test --release -p kinetic-vulkan` — référence f64 à 1e-5
-  (`check`), égalité de bits mono-token / passe prompt (`check_prompt_pass`), et
-  garde-fou `every_gemv_type_survives_a_prompt_pass`.
-- Verdict : le candidat est gardé s'il bat le contrôle sur la métrique cible, ne
-  régresse rien de plus de ~3 %, et passe les tests d'exactitude.
-
-## 3. Modèle de référence
-
-`Qwen3.8-27B-IQ3_XXS` — `qwen35`, 27,32 B paramètres, 65 couches, 11,47 Gio,
-255 tenseurs IQ3_XXS + 44 IQ4_XS + 43 Q5_K + 38 Q4_K + 22 Q6_K + 8 Q4_0 + 456 F32.
+  (`check`), égalité de bits mono-token / passe prompt (`check_prompt_pass`), garde-fou
+  `every_gemv_type_survives_a_prompt_pass`.
+- Un changement par essai, contrôle → candidat → contrôle. Un candidat n'est gardé que
+  s'il comble la lacune visée **sans** régresser ce qui marchait (> 3 % = régression).
 
 ---
 
-## 4. Essais
+## 4. Lacunes closes
 
-### E0 — Contrôle : CPU seulement (avant tout noyau IQ)
+### L1 — Types IQ dans les noyaux Vulkan (formats)
 
-- **Commit** : `110e6f2`. Vulkan refuse le modèle (`Vulkan has no kernel for
-  IQ3_XXS`), tout retombe sur le CPU.
-- **Commande** : `./target/release/kinetic bench 'local/Qwen3.8-27B-IQ3_XXS'
-  --device cpu -r 1` (best of 1 : ~20 min pour la passe complète).
-- **Mesure** : pp512 3,77 t/s, tg128 0,64 t/s, edit256 1,74 t/s. Pic mémoire
-  11,59 Gio.
-- **Verdict** : contrôle de départ.
+- **Lacune** : llama.cpp charge `IQ3_XXS`, `IQ4_XS`, `Q4_0` sur Vulkan ; Kinetic refusait
+  le modèle (`Vulkan has no kernel for IQ3_XXS`) et retombait sur le CPU.
+- **Travail** : layouts planaires, un noyau GEMV par type (commits `0127427`, `85d29aa`).
+- **Preuve** : `Qwen3.8-27B-IQ3_XXS` tourne sur `AMD Radeon RX 9070 XT (Vulkan)`,
+  sortie cohérente ; tests 6 + 20 + 1, dont références f64 et passe prompt bit-exacte.
+- **Effet mesuré** : CPU 3,8 t/s pp512 / 0,6 tg128 → Vulkan 154,8 / 38,1.
+- **Statut** : close.
 
-### E1 — Noyaux Vulkan IQ3_XXS, IQ4_XS, Q4_0
+### L2 — Passe de prompt sur ces types (performance)
 
-- **Hypothèse** : le modèle ne tourne pas sur GPU parce qu'il mêle trois types sans
-  noyau ; les ajouter (layout planaire, un noyau mono-token par type) suffit à
-  passer du CPU au GPU.
-- **Commit** : `0127427`.
-- **Mesure (protocole)** : pp512 154,8 t/s, pp2048 152,3 t/s.
-  **`bench -r 5`** : pp512 153,5, tg128 38,08, edit256 63,68. Pic 11,88 Gio.
-  **llama.cpp Vulkan0** : pp512 1159,5, pp2048 1153,5, tg128 40,27.
-- **Exactitude** : 6 + 20 + 1 tests OK, dont les références f64 des trois types et
-  `check_prompt_pass`.
-- **Verdict** : **gardé**. Décodage à 95 % de llama.cpp, préfill ×41 par rapport au
-  CPU mais 7,5× derrière llama.cpp.
-- **Faits saillants** : trois bugs corrigés avant validation — double comptage de
-  l'offset de plan `qs` (IQ3_XXS), bit de parité des signes (IQ3_XXS), extraction du
-  scale 6 bits `scales_l`/`scales_h` (IQ4_XS). Sans la référence f64, les trois
-  passaient inaperçus.
-
-### E2 — Noyaux many-token pour les mêmes types
-
-- **Hypothèse** : le préfill reste lent parce que le décode des poids est refait pour
-  chaque token ; un noyau « many tokens » (32 tokens par passe, `PROMPT_BATCH` 128)
-  doit s'en approcher des K-quants.
-- **Commit** : `85d29aa`.
-- **Mesure (protocole)** : pp512 261,9 t/s, pp2048 257,9 t/s.
-  **`bench -r 3`** : pp512 263,5, tg128 38,36, edit256 67,46.
-  **llama.cpp Vulkan0** : pp512 1154,2, pp2048 1149,0, tg128 40,07.
-- **Exactitude** : mêmes 6 + 20 + 1 tests, dont la passe prompt bit-exacte pour les
-  trois types (mêmes bits que le noyau mono-token, qui reste la référence).
-- **Verdict** : **gardé**. Préfill ×1,69, décodage inchangé, aucune régression.
-- **Incident** : un passage a échoué sur le F32 du GPU intégré (7800X3D / RAPHAEL),
-  sans lien avec les noyaux ; relancé à l'identique, tout passe. C'est la contention
-  connue entre les deux GPU quand un bench tourne en parallèle, à ne pas confondre
-  avec une régression.
-
-### Récapitulatif
-
-| Étape | Commit | pp512 | pp2048 | tg128 | llama pp512 | llama tg128 |
-|---|---|---:|---:|---:|---:|---:|
-| E0 CPU | `110e6f2` | 3,8 | — | 0,6 | — | — |
-| E1 noyaux IQ | `0127427` | 154,8 | 152,3 | 38,1 | 1159,5 | 40,3 |
-| E2 many-token | `85d29aa` | 261,9 | 257,9 | 38,4 | 1154,2 | 40,1 |
-
-Artefacts : `bench-results.csv` (E1) et `bench-many.csv` (E2) sont restés dans l'ancien
-répertoire de travail `/home/mrnemesys/Devs/kinetic-work`, non suivis par git.
+- **Lacune** : llama.cpp fait 1154 t/s de préfill sur ce fichier ; Kinetic en était à
+  154,8, soit 7,5× derrière.
+- **Travail** : noyaux many-token (`gemv_many.wgsl`, 32 tokens par passe, `PROMPT_BATCH`
+  128) pour les trois types (`85d29aa`).
+- **Preuve** : toujours bit-exact, `tg128` inchangé.
+- **Effet mesuré** : pp512 154,8 → 261,9 ; pp2048 152,3 → 257,9. Reste 4,4× derrière
+  llama (~23 % de son préfill).
+- **Statut** : close pour l'écart de méthode (GEMV par ligne ×32 au lieu d'un GEMV par
+  token) ; **l'écart résiduel de 4,4× reste ouvert** et devient L3.
 
 ---
 
-## 5. Écarts connus après E2
+## 5. File d'attente, par lacune
 
-| Écart | Effet mesuré ou attendu |
-|---|---|
-| Pas de GEMM tuilé (GEMV par ligne, sommes par sous-groupe) | préfill 4,4× derrière llama.cpp |
-| `Commands::submit` soumet puis attend (`commands.rs` 160–163) | aucun pas en vol ; 5–15 % attendus |
-| Pas de coopmat (`VK_KHR_cooperative_matrix` disponible sur RADV gfx1201) | 2–5× préfill, après le GEMM |
-| KV cache f16 seulement | mémoire de contexte, pas la vitesse |
-| Pas de MoE, pas de layer split | `qwen3-coder-30b-a3b` reste en CPU |
-| Types IQ4_NL, IQ3_S, Q5_0/Q5_1/Q4_1, Q2_K/Q3_K, MXFP4 absents | modèles concernés en CPU |
-| Décodage à 95 % | rien à gagner avant le prochain levier mémoire |
+Ordre : d'abord ce qui débloque une classe entière de fichiers avec une preuve rapide,
+ensuite ce qui demande un backend.
 
-## 6. Prochain essai
+### L3 — Préfill quantifié (performance)
 
-### E3 — GEMM de prompt tuilé pour les types quantifiés
+- **Lacune** : 261,9 t/s contre 1154,2 sur le même fichier et le même backend.
+- **Hypothèse** : les poids sont relus une fois par ligne, sans tuile en mémoire
+  partagée ni split-K ; la passe many-token garde 32 accumulateurs scalaires par
+  invocation et refait ses sommes par sous-groupe de 32.
+- **Cible** : pp512 ≥ 390 t/s (×1,5) sans toucher au décodage, bit-exact.
+- **Note** : un GEMM tuilé qui change l'ordre des sommes casse `check_prompt_pass` ;
+  la tuile doit préserver l'ordre par ligne, sinon l'essai est rejeté, pas toléré.
 
-- **Hypothèse** : le préfill est limité par la relecture des poids une fois par ligne
-  et l'absence de tuile ; un GEMM tuilé (mémoire partagée, split-K, déquant en
-  registres) doit approcher le préfill de llama.cpp sans toucher au décodage.
-- **Cible** : pp512 ≥ 390 t/s (×1,5), soit ≤ 3× llama.cpp.
-- **Exactitude requise** : référence f64 pour chaque type, même tolérance ; la passe
-  prompt doit rester bit-exacte vis-à-vis du noyau mono-token, sinon le chemin many
-  est retiré.
-- **Non-régression** : tg128 ≥ 37,2 t/s (−3 %), pic mémoire ≤ 12,1 Gio.
-- **Mesure** : protocole identique à E1/E2, un fichier, Vulkan0, avant/après.
+### L4 — MoE (architectures)
 
-### E4 — Soumission asynchrone (après E3)
+- **Lacune** : llama.cpp sert `qwen3moe`, `qwen2moe`, `llama4`, `deepseek2` ; Kinetic n'a
+  ni routage top-k ni GEMV groupé, et `qwen3-coder-30b-a3b` retombe sur le CPU.
+- **Preuve** : `qwen3-coder-30b-a3b` sur GPU, sortie cohérente, pp/tg comparés.
+- **Pourquoi ici** : c'est la lacune d'architecture qui couvre le plus de fichiers
+  réellement présents, et elle est mesurable sur cette machine.
 
-- **Hypothèse** : plusieurs frames en vol, timeline semaphores ; le graphe enregistré
-  existe déjà.
-- **Cible** : 5–15 % sur tg128 et pp512, sans changement de résultats.
+### L5 — Prétokenizers (tokenizers)
+
+- **Lacune** : `tekken` (et 14 autres du §6.2) absents ; `helcyon-gpt-4o-v4.5` ne charge
+  pas alors que son format est déjà couvert.
+- **Preuve** : mêmes ids que `llama-tokenize` sur un corpus de contrôle.
+
+### L6 — Quantification de production (outillage)
+
+- **Lacune** : llama.cpp produit IQ/NVFP4/FP8 avec imatrix ; Kinetic ne produit que
+  Q4_0/Q4_K_M/Q5_K_M/Q6_K/Q8_0, et ne sait pas *encoder* IQ3_XXS/IQ4_XS.
+- **Preuve** : un fichier produit par `kinetic quantize` se charge dans llama.cpp et
+  dans Kinetic avec le même `kinetic info`.
+
+### L7 — BF16 sur Vulkan, NVFP4/F8 (formats)
+
+- **Lacune** : `paddleocr-vl-1.6` est en BF16 ; RADV rapporte `bf16: 0`, donc à valider
+  avant d'annoncer. NVFP4 (type 40) et F8_E4M3 (type 43) manquent partout.
+
+### L8 — API et sampling (serveur)
+
+- **Lacune** : `ignore_eos`, `min_keep`, `dynatemp_*`, `adaptive_*`, `reasoning_budget` ;
+  routes `/infill`, `/apply-template`, `POST /props`, `POST /slots/:id_slot`,
+  `/lora-adapters`, `n > 1`.
+- **Preuve** : requêtes de référence sur `llama-server` rejouées contre Kinetic.
+
+### L9 — Backend HIP (backend)
+
+- **Lacune** : llama.cpp a ROCm0 et Vulkan0 ; Kinetic n'a que Vulkan et le CPU.
+- **Place** : après L3. Le décodage Vulkan est déjà à 95 % de llama Vulkan ; un backend
+  complet coûte L/XL et ne rendrait que l'écart de préfill que L3 attaque pour moins cher.
+
+---
+
+## 6. Journal des essais
+
+| # | Lacune | Commit | Mesure | Verdict |
+|---|---|---|---|---|
+| L1 | types IQ | `0127427` | 3,8 → 154,8 t/s pp512 | close |
+| L2 | préfill IQ | `85d29aa` | 154,8 → 261,9 t/s pp512 | close (écart 4,4× → L3) |
+| L3 | préfill tuilé | — | — | à faire |
+
+Détail des essais L1 et L2 : voir l'historique `git log` des commits cités et
+`llama-kinetic.md` §4.13. Les CSV de mesures (`bench-results.csv`, `bench-many.csv`)
+sont restés dans l'ancien répertoire `/home/mrnemesys/Devs/kinetic-work`, non suivis.
 
 ## 7. Règles de tenue
 
-- Tout essai ajoute une section datée ici avant d'être annoncé comme un gain.
-- Un chiffre sans commande, commit et date n'entre pas dans ce journal.
-- Un candidat qui échoue à l'exactitude est retiré du code, pas documenté comme une
-  option.
+- Une entrée par lacune, dans l'ordre de la file ; on ne saute pas L3 pour aller à L5
+  sans raison écrite.
+- Un chiffre sans commande, commit et date n'entre pas ici.
+- Une lacune comblée sans preuve reproductible est rouverte.
+- Une régression de plus de 3 % sur un cas déjà couvert annule l'essai.
