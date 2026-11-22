@@ -352,6 +352,31 @@ Trois mutations volontaires ont été essayées pour vérifier que le test mord 
 omettre la copie des couches hôte dans `load_state`, leur `rollback` et leur
 rafraîchissement dans `reset` font échouer le test, chacun sur son assertion.
 
+### Où la découpe serait nécessaire (22 nov. 2026)
+
+La découpe ne se justifierait que pour un modèle qui ne tient pas même avec le
+débordement. Mesuré sur cette machine, ce cas n'est pas atteignable, et le
+débordement lui-même n'est pas celui que le code croit faire :
+
+- le 35B alloue 21 077 Mio en mémoire « device-local » sur une carte de
+  15,9 Gio, et le noyau montre 16 039 Mio de VRAM plus 4 768 Mio de GTT. Le
+  pilote place donc lui-même l'excédent dans la RAM système, en sur-allouant
+  son tas local, sans jamais passer par un type mémoire non local ;
+- `HOST_SPILL` ne se déclenche jamais ici : abaissé de 10 Gio à 2 Gio puis à
+  0, le modèle se charge à l'identique, toujours 21 077 Mio en local, et
+  génère. Interdire aussi les types non locaux ne change rien : RADV répond
+  « local » et sature la GTT ;
+- le plafond réel est VRAM + GTT, 16 304 + 15 597 Mio ≈ 31,2 Gio, au-delà des
+  30 Gio de RAM. Aucun fichier local (20,22 Gio au plus) ne peut donc
+  déclencher « ne tient pas même avec le débordement ».
+
+Ce que la découpe apporterait, elle, est mesuré : 28 couches sur 40 laissent
+14 375 Mio sur le périphérique au lieu de 21 077, soit 6,7 Gio de moins. Sur un
+pilote qui refuse de déborder — c'est le cas des pilotes Windows — c'est la
+seule façon de charger un modèle plus gros que la VRAM ; ici elle n'est pas
+nécessaire, et deux fois plus lente (21 contre 33,5 t/s). Conclusion inchangée :
+opt-in, non mesurable comme sauvetage sur cette machine.
+
 ### Mesures de G5 (22 nov. 2026)
 
 `qwen3-coder-30b-a3b-instruct` UD-IQ3_XXS (11,97 Gio), un seul job GPU à la fois,

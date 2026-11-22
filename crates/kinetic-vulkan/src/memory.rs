@@ -10,9 +10,11 @@ use crate::error::{Check, Error, Result};
 
 /// Host-visible bounce buffer size for copies to and from device memory.
 const STAGING_BYTES: usize = 64 << 20;
-/// Most system memory a discrete GPU may take as relief for a full VRAM.
-/// Models belong in VRAM; past this, an allocation fails rather than
-/// creeping further into RAM.
+/// Most system memory a discrete GPU may take through a memory type outside
+/// its own, as relief for a full VRAM. Models belong in VRAM; past this, such
+/// an allocation fails rather than creeping further into RAM. Drivers that
+/// instead overcommit their device-local heap, as RADV does by placing it in
+/// GTT past the VRAM, never ask for a type here and stay past this cap.
 const HOST_SPILL: u64 = 10 << 30;
 
 mod sealed {
