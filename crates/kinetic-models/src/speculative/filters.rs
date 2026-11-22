@@ -18,9 +18,9 @@ pub(super) fn top_n_sigma(c: &mut Vec<(u32, f32)>, n: f32) {
 }
 
 /// Keeps the tokens whose surprise is closest to the expected surprise
-/// until their probabilities add up to more than `p`; takes and leaves
-/// probabilities, most likely first.
-pub(super) fn typical(c: &mut Vec<(u32, f32)>, p: f32) {
+/// until their probabilities add up to more than `p`, and at least
+/// `min_keep` of them; takes and leaves probabilities, most likely first.
+pub(super) fn typical(c: &mut Vec<(u32, f32)>, p: f32, min_keep: usize) {
     let entropy: f32 = c
         .iter()
         .filter(|x| x.1 > 0.0)
@@ -36,7 +36,9 @@ pub(super) fn typical(c: &mut Vec<(u32, f32)>, p: f32) {
             sum += c[i].1;
             sum > p
         })
-        .map_or(c.len(), |i| i + 1);
+        .map_or(c.len(), |i| i + 1)
+        .max(min_keep)
+        .min(c.len());
     let mut kept = vec![false; c.len()];
     order[..keep].iter().for_each(|&i| kept[i] = true);
     let mut i = 0;
@@ -48,13 +50,14 @@ pub(super) fn typical(c: &mut Vec<(u32, f32)>, p: f32) {
 }
 
 /// XTC: with chance `probability`, drops every token at least `threshold`
-/// likely except the least likely of them. `chance` draws the uniform
-/// number that decides, only when XTC could apply. Takes and leaves
-/// probabilities, most likely first.
+/// likely except the least likely of them, never going below `min_keep`.
+/// `chance` draws the uniform number that decides, only when XTC could
+/// apply. Takes and leaves probabilities, most likely first.
 pub(super) fn xtc(
     c: &mut Vec<(u32, f32)>,
     probability: f32,
     threshold: f32,
+    min_keep: usize,
     chance: impl FnOnce() -> f32,
 ) {
     if probability <= 0.0 || threshold > 0.5 || c.len() < 2 || chance() > probability {
@@ -62,8 +65,9 @@ pub(super) fn xtc(
     }
     normalize(c);
     let above = c.iter().take_while(|x| x.1 >= threshold).count();
-    if above > 1 {
-        c.drain(..above - 1);
+    let drop = (above - 1).min(c.len().saturating_sub(min_keep));
+    if drop > 0 {
+        c.drain(..drop);
     }
 }
 
@@ -137,11 +141,11 @@ mod tests {
         // entropy of [0.5, 0.3, 0.2] is 1.0297; surprises 0.693, 1.204,
         // 1.609: distances 0.337, 0.174, 0.580, so 0.3 then 0.5 go first
         let mut c = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
-        typical(&mut c, 0.4);
+        typical(&mut c, 0.4, 0);
         assert_eq!((c[0].0, c[1].0), (0, 1));
         assert_eq!(probs(&c), [0.625, 0.375]);
         let mut c = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
-        typical(&mut c, 0.2);
+        typical(&mut c, 0.2, 0);
         assert_eq!(c, [(1, 1.0)]);
     }
 
@@ -149,13 +153,13 @@ mod tests {
     fn xtc_drops_all_likely_tokens_but_the_last() {
         let start = vec![(0, 0.5), (1, 0.3), (2, 0.15), (3, 0.05)];
         let mut c = start.clone();
-        xtc(&mut c, 1.0, 0.1, || 0.5);
+        xtc(&mut c, 1.0, 0.1, 0, || 0.5);
         assert_eq!(c.iter().map(|x| x.0).collect::<Vec<_>>(), [2, 3]);
         let mut c = start.clone();
-        xtc(&mut c, 0.4, 0.1, || 0.5);
+        xtc(&mut c, 0.4, 0.1, 0, || 0.5);
         assert_eq!(c, start);
         let mut c = start.clone();
-        xtc(&mut c, 1.0, 0.6, || unreachable!());
+        xtc(&mut c, 1.0, 0.6, 0, || unreachable!());
         assert_eq!(c, start);
     }
 

@@ -565,6 +565,15 @@ impl<'a> Engine<'a> {
             )));
         }
         let max_tokens = request.max_tokens.map_or(room, |n| n.min(room));
+        // `ignore_eos` keeps going past every token that would end the
+        // reply, the end-of-sequence one and the model's end-of-turn
+        // markers alike; only `max_tokens`, the context and stop strings
+        // end it then.
+        let stop_tokens: Vec<u32> = match request.sampling.ignore_eos {
+            true => Vec::new(),
+            false => self.stop_tokens.clone(),
+        };
+
 
         let mut decoder = self.tokenizer.stream();
         let mut stops = StopStrings::new(&request.stop);
@@ -593,6 +602,7 @@ impl<'a> Engine<'a> {
         let mut finish = Finish::Length;
         let mut cut = false;
         let mut generated = 0;
+        let mut reasoning = 0;
         let mut output_ids = Vec::new();
         let mut deliver = |part: Split, generated: usize, out: &mut Split| {
             out.reasoning.push_str(&part.reasoning);
@@ -602,14 +612,14 @@ impl<'a> Engine<'a> {
 
         let vocab = request.grammar.as_ref().map(|_| {
             self.vocab.get_or_init(|| {
-                Vocabulary::from_tokenizer(&self.tokenizer).with_stop_tokens(&self.stop_tokens)
+                Vocabulary::from_tokenizer(&self.tokenizer).with_stop_tokens(&stop_tokens)
             })
         });
         let sampling = self.with_breakers(&request.sampling);
         let job = Job {
             sampling: &sampling,
             max_tokens,
-            stop_tokens: &self.stop_tokens,
+            stop_tokens: &stop_tokens,
             grammar: request.grammar.as_deref().zip(vocab),
             images: &images,
             logprobs,
@@ -623,12 +633,30 @@ impl<'a> Engine<'a> {
                 for &t in tokens {
                     generated += 1;
                     output_ids.push(t);
-                    if self.stop_tokens.contains(&t) {
+                    if stop_tokens.contains(&t) {
                         finish = Finish::Stop;
                         return false;
                     }
+                    // control tokens are markup, not text: printing
+                    // `<|eot_id|>` after a turn would show them to clients
+                    if self.tokenizer.control(t) {
+                        continue;
+                    }
                     let (text, hit) = stops.push(&decoder.push(t));
                     let open = deliver(split(&text), generated, &mut out);
+                    // the budget counts what the model spends before it
+                    // starts answering, and ends the turn when it is gone
+                    if out.content.is_empty() {
+                        reasoning += 1;
+                        if request
+                            .sampling
+                            .reasoning_budget
+                            .is_some_and(|budget| reasoning >= budget)
+                        {
+                            finish = Finish::Length;
+                            return false;
+                        }
+                    }
                     if hit {
                         (finish, cut) = (Finish::Stop, true);
                         return false;

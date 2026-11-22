@@ -332,9 +332,11 @@ fn settings(s: &Sampling, max_tokens: Option<usize>, stop: &[String], stream: bo
         "max_tokens": n_predict,
         "n_predict": n_predict,
         "stream": stream,
+        "dynatemp_range": s.dynatemp_range,
+        "dynatemp_exponent": s.dynatemp_exponent,
+        "adaptive_target": s.adaptive_target,
+        "adaptive_decay": s.adaptive_decay,
         // samplers Kinetic does not have, reported as llama.cpp's off values
-        "dynatemp_range": 0.0,
-        "dynatemp_exponent": 1.0,
         "top_n_sigma": -1.0,
         "xtc_probability": 0.0,
         "xtc_threshold": 0.1,
@@ -342,10 +344,10 @@ fn settings(s: &Sampling, max_tokens: Option<usize>, stop: &[String], stream: bo
         "dry_multiplier": 0.0,
         "mirostat": 0,
         "n_keep": 0,
-        "ignore_eos": false,
+        "ignore_eos": s.ignore_eos,
         "logit_bias": [],
         "n_probs": 0,
-        "min_keep": 0,
+        "min_keep": s.min_keep,
         "samplers": ["penalties", "top_k", "top_p", "min_p", "temperature"],
     })
 }

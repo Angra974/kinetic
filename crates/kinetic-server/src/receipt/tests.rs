@@ -34,6 +34,13 @@ fn busy_request() -> Request {
             mirostat: 2,
             mirostat_tau: 4.0,
             mirostat_eta: 0.2,
+            dynatemp_range: 0.3,
+            dynatemp_exponent: 1.2,
+            min_keep: 2,
+            adaptive_target: 0.6,
+            adaptive_decay: 0.7,
+            ignore_eos: true,
+            reasoning_budget: Some(8),
         },
         max_tokens: Some(16),
         stop: vec!["

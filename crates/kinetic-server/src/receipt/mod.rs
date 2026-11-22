@@ -265,12 +265,38 @@ pub struct Settings {
     pub mirostat: u8,
     pub mirostat_tau: f32,
     pub mirostat_eta: f32,
+    #[serde(default)]
+    pub dynatemp_range: f32,
+    #[serde(default = "one")]
+    pub dynatemp_exponent: f32,
+    #[serde(default)]
+    pub min_keep: usize,
+    #[serde(default = "minus_one")]
+    pub adaptive_target: f32,
+    #[serde(default = "nine_tenths")]
+    pub adaptive_decay: f32,
+    #[serde(default)]
+    pub ignore_eos: bool,
+    #[serde(default)]
+    pub reasoning_budget: Option<usize>,
     pub seed: u64,
     pub max_tokens: Option<usize>,
     pub stop: Vec<String>,
     /// `{"grammar": ...}` or `{"response_format": ...}`, as sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraint: Option<Value>,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn minus_one() -> f32 {
+    -1.0
+}
+
+fn nine_tenths() -> f32 {
+    0.9
 }
 
 impl Settings {
@@ -299,6 +325,13 @@ impl Settings {
             mirostat: s.mirostat,
             mirostat_tau: s.mirostat_tau,
             mirostat_eta: s.mirostat_eta,
+            dynatemp_range: s.dynatemp_range,
+            dynatemp_exponent: s.dynatemp_exponent,
+            min_keep: s.min_keep,
+            adaptive_target: s.adaptive_target,
+            adaptive_decay: s.adaptive_decay,
+            ignore_eos: s.ignore_eos,
+            reasoning_budget: s.reasoning_budget,
             seed,
             max_tokens: request.max_tokens,
             stop: request.stop.clone(),
@@ -426,6 +459,13 @@ impl Receipt {
                 mirostat: s.mirostat,
                 mirostat_tau: s.mirostat_tau,
                 mirostat_eta: s.mirostat_eta,
+                dynatemp_range: s.dynatemp_range,
+                dynatemp_exponent: s.dynatemp_exponent,
+                min_keep: s.min_keep,
+                adaptive_target: s.adaptive_target,
+                adaptive_decay: s.adaptive_decay,
+                ignore_eos: s.ignore_eos,
+                reasoning_budget: s.reasoning_budget,
                 seed: Some(s.seed),
             },
             max_tokens: s.max_tokens,

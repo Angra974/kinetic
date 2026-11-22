@@ -154,6 +154,14 @@ pub struct Common {
     mirostat: Option<i64>,
     mirostat_tau: Option<f32>,
     mirostat_eta: Option<f32>,
+    dynatemp_range: Option<f32>,
+    dynatemp_exponent: Option<f32>,
+    min_keep: Option<i64>,
+    adaptive_target: Option<f32>,
+    adaptive_decay: Option<f32>,
+    ignore_eos: Option<bool>,
+    #[serde(alias = "reasoning_budget")]
+    reasoning_budget_tokens: Option<i64>,
     /// Adds a receipt that reproduces the answer to the response.
     receipt: Option<bool>,
 }
@@ -272,6 +280,20 @@ impl Common {
         }
         if let Some(b) = &self.dry_sequence_breakers {
             s.dry_sequence_breakers = b.clone();
+        }
+        set(&mut s.dynatemp_range, self.dynatemp_range.map(|r| r.max(0.0)));
+        set(&mut s.dynatemp_exponent, self.dynatemp_exponent);
+        if let Some(n) = self.min_keep {
+            s.min_keep = usize::try_from(n).unwrap_or(0);
+        }
+        set(&mut s.adaptive_target, self.adaptive_target);
+        set(&mut s.adaptive_decay, self.adaptive_decay);
+        if let Some(b) = self.ignore_eos {
+            s.ignore_eos = b;
+        }
+        if let Some(n) = self.reasoning_budget_tokens {
+            // negative asks for no budget, as in llama.cpp
+            s.reasoning_budget = usize::try_from(n).ok();
         }
         if let Some(m) = self.mirostat {
             s.mirostat = u8::try_from(m)
@@ -576,6 +598,34 @@ mod tests {
         assert_eq!(req.max_tokens, Some(12));
         assert_eq!(req.stop, ["\n\n"]);
         validate_messages(&r.messages).unwrap();
+    }
+
+    #[test]
+    fn reads_the_sampling_llama_server_takes_beyond_openai() {
+        let r = chat(json!({
+            "messages": [{"role": "user", "content": "Hi"}],
+            "dynatemp_range": 0.4,
+            "dynatemp_exponent": 1.2,
+            "min_keep": 3,
+            "adaptive_target": 0.5,
+            "adaptive_decay": 0.8,
+            "ignore_eos": true,
+            "reasoning_budget_tokens": 64,
+        }));
+        let req = r.common.request(&Sampling::default()).unwrap();
+        assert_eq!(req.sampling.dynatemp_range, 0.4);
+        assert_eq!(req.sampling.dynatemp_exponent, 1.2);
+        assert_eq!(req.sampling.min_keep, 3);
+        assert_eq!(req.sampling.adaptive_target, 0.5);
+        assert_eq!(req.sampling.adaptive_decay, 0.8);
+        assert!(req.sampling.ignore_eos);
+        assert_eq!(req.sampling.reasoning_budget, Some(64));
+        // the negative budget llama.cpp uses for "none"
+        let off = chat(json!({
+            "messages": [{"role": "user", "content": "Hi"}],
+            "reasoning_budget": -1,
+        }));
+        assert_eq!(off.common.request(&Sampling::default()).unwrap().sampling.reasoning_budget, None);
     }
 
     #[test]

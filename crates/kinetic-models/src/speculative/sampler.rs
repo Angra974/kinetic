@@ -61,6 +61,27 @@ pub struct Sampling {
     pub mirostat_tau: f32,
     /// How fast Mirostat follows its target.
     pub mirostat_eta: f32,
+    /// Widens `temperature` up to `temperature + dynatemp_range` on flat
+    /// distributions; zero or below keeps the temperature fixed.
+    pub dynatemp_range: f32,
+    /// Curves how quickly the dynamic temperature reaches its widest; 1 is
+    /// linear in the distribution's entropy.
+    pub dynatemp_exponent: f32,
+    /// Keeps at least this many candidates through every truncation, so a
+    /// narrow `top_p` or `min_p` cannot leave a single token behind.
+    pub min_keep: usize,
+    /// Aims the choice at tokens this likely, away from both the head and
+    /// the tail of the distribution; negative disables it.
+    pub adaptive_target: f32,
+    /// How much of the recent aiming survives each token; 0 forgets at
+    /// once, close to 1 remembers for a long time.
+    pub adaptive_decay: f32,
+    /// Keeps generating after the model's end-of-sequence token, for prompt
+    /// lengths and benchmarks that measure what the model would say next.
+    pub ignore_eos: bool,
+    /// Ends the turn once this many tokens were spent before the answer
+    /// started, rather than letting reasoning run to the token limit.
+    pub reasoning_budget: Option<usize>,
 }
 
 impl Default for Sampling {
@@ -89,6 +110,13 @@ impl Default for Sampling {
             mirostat: 0,
             mirostat_tau: 5.0,
             mirostat_eta: 0.1,
+            dynatemp_range: 0.0,
+            dynatemp_exponent: 1.0,
+            min_keep: 0,
+            adaptive_target: -1.0,
+            adaptive_decay: 0.9,
+            ignore_eos: false,
+            reasoning_budget: None,
         }
     }
 }
@@ -139,14 +167,44 @@ pub struct Sampler {
     modified: Vec<f32>,
     breakers: Breakers,
     mirostat: Mirostat,
+    /// Probabilities the adaptive aim compares against, one per candidate.
+    originals: Vec<f32>,
+    adaptive: Option<Adaptive>,
     log: Option<Logprobs>,
 }
+
+/// The running average of how likely the chosen tokens were, which the
+/// adaptive aim pulls back towards its target.
+struct Adaptive {
+    weighted_sum: f32,
+    total_weight: f32,
+}
+
+impl Adaptive {
+    /// Starts out believing it already hits the target, as llama.cpp does.
+    fn new(target: f32, decay: f32) -> Self {
+        Adaptive {
+            weighted_sum: target / (1.0 - decay),
+            total_weight: 1.0 / (1.0 - decay),
+        }
+    }
+}
+
+/// How far from the aimed probability the weighting spreads.
+const ADAPTIVE_WIDTH: f32 = 0.3;
+/// The logit at the aimed probability, and how fast it falls away.
+const ADAPTIVE_PEAK: f32 = 5.0;
+const ADAPTIVE_SHARPNESS: f32 = 10.0;
 
 impl Sampler {
     pub fn new(params: Sampling) -> Self {
         let seed = params
             .seed
             .unwrap_or_else(|| RandomState::new().hash_one(std::time::SystemTime::now()));
+        let adaptive = (params.adaptive_target >= 0.0
+            && params.adaptive_decay > 0.0
+            && params.adaptive_decay < 1.0)
+            .then(|| Adaptive::new(params.adaptive_target, params.adaptive_decay));
         Sampler {
             breakers: dry::breakers(&params),
             mirostat: Mirostat {
@@ -159,6 +217,8 @@ impl Sampler {
             rng: SplitMix64(seed),
             candidates: Vec::new(),
             modified: Vec::new(),
+            originals: Vec::new(),
+            adaptive,
             log: None,
         }
     }
@@ -241,7 +301,7 @@ impl Sampler {
 
         softmax(c, 1.0);
         if p.typical_p < 1.0 {
-            filters::typical(c, p.typical_p);
+            filters::typical(c, p.typical_p, p.min_keep);
         }
         if p.top_p < 1.0 {
             let mut sum = 0.0;
@@ -252,22 +312,95 @@ impl Sampler {
                     sum >= p.top_p
                 })
                 .map_or(c.len(), |i| i + 1);
-            c.truncate(keep);
+            c.truncate(keep.max(p.min_keep));
         }
         if p.min_p > 0.0 {
             let floor = c[0].1 * p.min_p;
             let keep = c.iter().take_while(|&&(_, prob)| prob >= floor).count();
-            c.truncate(keep.max(1));
+            c.truncate(keep.max(1).max(p.min_keep));
         }
         let rng = &mut self.rng;
-        filters::xtc(c, p.xtc_probability, p.xtc_threshold, || rng.next_f32());
+        filters::xtc(
+            c,
+            p.xtc_probability,
+            p.xtc_threshold,
+            p.min_keep,
+            || rng.next_f32(),
+        );
 
         for (id, prob) in c.iter_mut() {
             *prob = logits[*id as usize];
         }
-        softmax(c, p.temperature);
+        let temperature = dynamic_temperature(c, p);
+        if temperature <= 0.0 {
+            return argmax(logits);
+        }
+        softmax(c, temperature);
+        if self.adaptive.is_some() {
+            return self.aim();
+        }
         c[draw(c, self.rng.next_f32())].0
     }
+
+    /// Chooses a token whose probability lands near the adapted target:
+    /// aims at `adaptive_target`, pulled back by how likely the recent
+    /// choices actually were, then weights every candidate by how close it
+    /// sits to that probability.
+    fn aim(&mut self) -> u32 {
+        let target = self.params.adaptive_target.clamp(0.0, 1.0);
+        let (decay, originals, c) = (
+            self.params.adaptive_decay,
+            &mut self.originals,
+            &mut self.candidates,
+        );
+        let state = self.adaptive.as_mut().expect("aim without an adaptive state");
+        let recent = state.weighted_sum / state.total_weight;
+        let aimed = (2.0 * target - recent).clamp(0.0, 1.0);
+        originals.clear();
+        originals.extend(c.iter().map(|x| x.1));
+        let mut max = f32::NEG_INFINITY;
+        for (_, prob) in c.iter_mut() {
+            let dist = ((*prob - aimed) / ADAPTIVE_WIDTH).abs();
+            *prob = ADAPTIVE_PEAK - ADAPTIVE_SHARPNESS * dist * dist / (1.0 + dist);
+            max = max.max(*prob);
+        }
+        let mut sum = 0.0;
+        for (_, prob) in c.iter_mut() {
+            *prob = (*prob - max).exp();
+            sum += *prob;
+        }
+        for (_, prob) in c.iter_mut() {
+            *prob /= sum;
+        }
+        let i = draw(c, self.rng.next_f32());
+        let prob = originals[i];
+        state.weighted_sum = prob + decay * state.weighted_sum;
+        state.total_weight = 1.0 + decay * state.total_weight;
+        c[i].0
+    }
+}
+
+/// The temperature this step samples at: `temperature` widened towards
+/// `dynatemp_range` by how flat the candidates still are, `temperature`
+/// itself when the range is off. `c` holds logits, highest first.
+fn dynamic_temperature(c: &[(u32, f32)], p: &Sampling) -> f32 {
+    if p.dynatemp_range <= 0.0 || c.len() < 2 {
+        return p.temperature;
+    }
+    let max = c[0].1;
+    let sum: f32 = c.iter().map(|x| (x.1 - max).exp()).sum();
+    let entropy: f32 = c
+        .iter()
+        .map(|x| (x.1 - max).exp() / sum)
+        .filter(|p| *p > 0.0)
+        .map(|p| -p * p.ln())
+        .sum();
+    // the flattest distribution this many candidates can have
+    let widest = (c.len() as f32).ln();
+    let flat = (entropy / widest).clamp(0.0, 1.0);
+    let low = (p.temperature - p.dynatemp_range).max(0.0);
+    let high = p.temperature + p.dynatemp_range;
+    low + (high - low) * flat.powf(p.dynatemp_exponent)
 }
 
 /// Highest logit first, ties to the lower token.
@@ -537,5 +670,79 @@ mod tests {
             ..Sampling::default()
         };
         assert_eq!(penalized.top(), None);
+    }
+
+    #[test]
+    fn min_keep_holds_the_truncations_open() {
+        // top_p 0 keeps one token, min_keep 3 keeps three
+        let c = counts(
+            Sampling {
+                temperature: 1.0,
+                top_k: 0,
+                top_p: 0.0,
+                min_p: 0.0,
+                min_keep: 3,
+                ..Sampling::default()
+            },
+            &[3.0, 2.0, 1.0, 0.0],
+            1000,
+        );
+        assert_eq!(c[3], 0);
+        assert!(c[0] > 0 && c[1] > 0 && c[2] > 0, "{c:?}");
+    }
+
+    #[test]
+    fn dynamic_temperature_follows_the_entropy() {
+        let flat = Sampling {
+            temperature: 0.5,
+            dynatemp_range: 1.0,
+            ..Sampling::default()
+        };
+        // four equally likely tokens: entropy is the widest it can be
+        let even = [(0, 0.0), (1, 0.0), (2, 0.0), (3, 0.0)];
+        assert!((dynamic_temperature(&even, &flat) - 1.5).abs() < 1e-5);
+        // one token far above the rest: entropy is nearly zero
+        let peak = [(0, 10.0), (1, 0.0), (2, 0.0), (3, 0.0)];
+        assert!(dynamic_temperature(&peak, &flat) < 0.01);
+        // the range off leaves the temperature alone
+        let fixed = Sampling {
+            temperature: 0.5,
+            ..Sampling::default()
+        };
+        assert_eq!(dynamic_temperature(&even, &fixed), 0.5);
+    }
+
+    #[test]
+    fn adaptive_aims_away_from_the_likeliest_token() {
+        let logits = [4.0, 2.0, 0.0, -2.0];
+        let plain = counts(
+            Sampling {
+                temperature: 1.0,
+                top_k: 0,
+                top_p: 1.0,
+                min_p: 0.0,
+                ..Sampling::default()
+            },
+            &logits,
+            1000,
+        );
+        let aimed = counts(
+            Sampling {
+                temperature: 1.0,
+                top_k: 0,
+                top_p: 1.0,
+                min_p: 0.0,
+                adaptive_target: 0.5,
+                adaptive_decay: 0.9,
+                ..Sampling::default()
+            },
+            &logits,
+            1000,
+        );
+        // plain sampling takes the head about 87% of the time; aiming at
+        // 0.5 prefers the tokens nearest that probability instead
+        assert!(aimed[0] < plain[0] * 3 / 4, "plain {plain:?} aimed {aimed:?}");
+        assert!(aimed[1] > plain[1] * 2, "plain {plain:?} aimed {aimed:?}");
+        assert_eq!(aimed.iter().sum::<usize>(), 1000);
     }
 }
