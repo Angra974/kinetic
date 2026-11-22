@@ -272,13 +272,17 @@ job GPU à la fois, deux passes de chaque côté.
 | tg128 | 43,33 t/s | 29,9-30,2 t/s |
 | pic VRAM | 15 981 Mio | 16 185 Mio |
 
-Les deux configurations ne sont pas identiques, faute d'équivalent : llama garde
-31 couches sur le périphérique et calcule les 10 autres, experts compris, sur le
-CPU ; kinetic n'a pas de découpe de couches sur Vulkan, met les 40 sur le
-périphérique et laisse 4,4 Go déborder en RAM système, relus par le bus une fois
-par passe. `kinetic bench` n'a donc pas de `--gpu-layers` à proposer : le backend
-Vulkan ne le lit pas (`kinetic run` l'accepte et l'ignore de même), c'est le
-`HOST_SPILL` qui décide de ce qui reste en VRAM.
+Les deux configurations ne sont pas identiques, faute d'équivalent **au moment de
+cette mesure** : llama garde 31 couches sur le périphérique et calcule les 10
+autres, experts compris, sur le CPU ; kinetic mettait alors les 40 sur le
+périphérique et laissait 4,4 Go déborder en RAM système, relus par le bus une
+fois par passe. `kinetic bench` n'avait donc pas de `--gpu-layers` à proposer :
+le backend Vulkan ne lisait pas ce drapeau (`kinetic run` l'acceptait et
+l'ignorait de même), c'est le `HOST_SPILL` qui décidait de ce qui restait en
+VRAM. G8 (`2c6c03b`) a depuis porté la découpe, et « Découpe GPU/CPU du 35B »
+ci-dessous la mesure : elle reste optionnelle, deux fois plus lente que le
+placement en place. Les chiffres ci-dessus valent donc pour le seul placement
+par débordement.
 
 La passe many-token mesurée ici (512 tokens) nuance la lecture du prompt court de
 G6 : à 18 tokens kinetic était devant (91 contre 82 t/s), mais à 512 il est 3,2×
