@@ -73,12 +73,14 @@ def main():
         print(f"no recorded best for {name}; nothing to compare")
         return
     for label, (field, _) in METRICS.items():
-        if field not in ref or not res.get(field):
+        if field not in res or not res.get(field):
             continue
-        drop = 1 - res[field] / ref[field]
+        if label not in ref:
+            continue
+        drop = 1 - res[field] / ref[label]
         flag = "REGRESSION" if drop > a.threshold else "ok"
         failed |= drop > a.threshold
-        print(f"{label}: {res[field]:.1f} vs best {ref[field]:.1f} "
+        print(f"{label}: {res[field]:.1f} vs best {ref[label]:.1f} "
               f"({drop:+.1%}) {flag}")
     if res.get("edit_identical") is False:
         print("edit_identical is false: output drift")
