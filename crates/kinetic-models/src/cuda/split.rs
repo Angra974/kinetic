@@ -22,8 +22,8 @@ use crate::{LoadError, Model};
 /// The default puts as much there as fits and records decode steps.
 #[derive(Clone, Debug, Default)]
 pub struct Placement {
-    /// Most layers on the device, as llama.cpp's `-ngl` counts them; over
-    /// all devices when there are several.
+    /// Most layers on the device, the last ones; llama.cpp's `-ngl` keeps the
+    /// count but takes the first. Over all devices when there are several.
     pub gpu_layers: Option<usize>,
     /// Most device bytes the model may take, weights and one state, on
     /// each device.

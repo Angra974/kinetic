@@ -57,8 +57,9 @@ impl<'a> VulkanBackend<'a> {
     }
 
     /// [`VulkanBackend::new`] with its last `gpu_layers` layers on the
-    /// device, as llama.cpp's `-ngl` counts them; the layers before them
-    /// run on the host, and `None` takes as many as fit.
+    /// device, and `None` taking as many as fit; the layers before them run on
+    /// the host. llama.cpp's `-ngl` keeps the count but uploads the first
+    /// layers, so the two split the stack at opposite ends.
     pub fn with_gpu_layers(
         model: &'a Model<'a>,
         context: usize,

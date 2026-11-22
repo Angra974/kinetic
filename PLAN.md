@@ -293,6 +293,12 @@ place les `N` dernières couches sur le périphérique, les premières tournent 
 le CPU avec les mêmes opérations que le chemin CPU, et seuls `n_embd` flottants
 par token traversent. `kinetic bench --gpu-layers N` la mesure.
 
+Kinetic prend les **dernières** couches, llama `-ngl N` les **premières** : les
+deux réglages laissent le même nombre de couches sur le périphérique, pas les
+mêmes. Les chiffres ci-dessous comparent donc des quantités de couches sur le
+GPU, pas des poids résidents identiques ; le code et `docs/src/cli.md` le
+disent maintenant explicitement.
+
 | Test | llama-bench `-ngl 31` | kinetic défaut | kinetic `--gpu-layers 31` |
 |---|---:|---:|---:|
 | pp512 | 642,67 t/s | 205,46 t/s | 167,11 t/s |

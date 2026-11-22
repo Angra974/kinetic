@@ -120,9 +120,12 @@ crosses between the two. The status line says how the model was split:
 [... on NVIDIA GeForce RTX 3060 Laptop GPU, 24 of 33 layers, the rest on the CPU]
 ```
 
-`--gpu-layers N` puts at most `N` layers on the GPU, as llama.cpp's `-ngl N`
-does; use it to leave GPU memory for other programs. This works through
-CUDA; on Vulkan a model runs wholly on the GPU or on the CPU.
+`--gpu-layers N` puts at most `N` layers on the GPU, the last ones as above,
+and the rest on the CPU; use it to leave GPU memory for other programs.
+llama.cpp's `-ngl N` keeps the count but uploads the *first* `N` layers, so the
+two settings leave the same number of layers on the device, not the same ones;
+compare them on generation speed, not on which weights are resident. This works
+through CUDA and Vulkan.
 
 ## Several GPUs
 

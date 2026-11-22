@@ -107,7 +107,7 @@ seeded answer is the same for the same seed.
 | `-c`, `--ctx-size <N>` | most tokens per conversation, prompt and answer together; 0 uses all the model supports [default: 32768, or less if the model was trained on less, or if its cache would not fit beside the model on the GPU] |
 | `-t`, `--threads <N>` | CPU threads [default: all] |
 | `--device <auto\|cpu\|cuda\|vulkan>` | where the model runs; `auto` tries CUDA, then Vulkan, then the CPU [default: auto]; see [Devices](devices.md) |
-| `--gpu-layers <N>` | most layers on the GPU, the rest on the CPU [default: as many as fit]; see [Devices](devices.md#dense-models-larger-than-the-gpu) |
+| `--gpu-layers <N>` | most layers on the GPU, the last ones, the rest on the CPU; llama.cpp's `-ngl N` keeps the count but takes the first [default: as many as fit]; see [Devices](devices.md#dense-models-larger-than-the-gpu) |
 | `--gpus <LIST>` | CUDA GPUs to spread the layers over, such as `0,1`; the first also holds the embeddings and output head [default: 0]; see [Devices](devices.md#several-gpus) |
 | `--cache-dir <DIR>` | where Warm Start keeps prompt states [default: `kinetic/warm` in the user's cache directory] |
 | `--no-prompt-cache` | run every prompt from its first token; same as `--off warm-start` |
@@ -234,7 +234,7 @@ kinetic bench model.gguf --device cpu -t 6 -r 5 --json
 | `-t`, `--threads <N>` | CPU threads [default: all] |
 | `--device <auto\|cpu\|cuda>` | the device to measure [default: auto] |
 | `--gpus <LIST>` | CUDA GPUs to spread the layers over, as for `run` |
-| `--gpu-layers <N>` | most layers on the GPU, the rest on the CPU, as for `run` [default: as many as fit] |
+| `--gpu-layers <N>` | most layers on the GPU, the last ones, as for `run` [default: as many as fit] |
 | `--json` | print the results as one JSON object |
 | `--compare [LLAMA_BENCH]` | also run llama.cpp on the same file and print a card with both; see [bench --compare](#bench---compare) |
 | `--off <LIST>` | turn speed technologies off, as for `run`; bench measures RAD-1 (`edit256`), Shortlist and Torque |

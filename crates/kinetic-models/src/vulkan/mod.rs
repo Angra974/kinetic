@@ -191,11 +191,18 @@ struct Output {
     logits: Vec<f32>,
 }
 
-/// Uploads `model`'s last `gpu_layers` layers, as llama.cpp's `-ngl` counts
-/// them, and every layer when `None`: a model larger than the VRAM spills
-/// what it cannot hold into the system's memory and reads it over the bus,
-/// which measurably beats running those layers on the CPU here. Returns how
-/// many layers stay on the host, and those on the device after them.
+/// Uploads `model`'s last `gpu_layers` layers, the end of the stack the head
+/// reads, and every layer when `None`: the layers before them run on the host,
+/// as the CUDA split does. A model larger than the VRAM spills what it cannot
+/// hold into the system's memory and reads it over the bus, which measurably
+/// beats running those layers on the CPU here.
+///
+/// llama.cpp's `-ngl N` keeps the count but uploads the *first* `N` layers, so
+/// the two settings put the same number of layers on the device, not the same
+/// ones: compare the count, or the throughput, never the resident weights.
+///
+/// Returns how many layers stay on the host, and those on the device after
+/// them.
 fn upload_layers<'a>(
     model: &Model<'a>,
     gpu: &Gpu,
@@ -237,9 +244,9 @@ impl<'m> VulkanModel<'m> {
     }
 
     /// Uploads `model` to the first Vulkan device that can run it, for
-    /// sequences of up to `context` tokens: its last `gpu_layers` layers,
-    /// as llama.cpp's `-ngl` counts them, and as many as fit when `None`.
-    /// The layers before them run on the host.
+    /// sequences of up to `context` tokens: its last `gpu_layers` layers (the
+    /// count `-ngl` takes, from the other end of the stack), and as many as
+    /// fit when `None`. The layers before them run on the host.
     pub fn load_on(
         model: &'m Model<'m>,
         context: usize,

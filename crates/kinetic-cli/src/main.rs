@@ -148,8 +148,8 @@ enum Command {
         /// embeddings and the output head [default: 0]
         #[arg(long, value_name = "LIST", value_delimiter = ',')]
         gpus: Vec<usize>,
-        /// Most layers on the GPU, the rest on the CPU [default: as many as
-        /// fit]
+        /// Most layers on the GPU, the last ones, as for `run` [default: as
+        /// many as fit]
         #[arg(long, value_name = "N")]
         gpu_layers: Option<usize>,
         /// Also run llama.cpp's llama-bench on the same file with the same
@@ -320,7 +320,8 @@ struct RuntimeArgs {
     /// Where the model runs; auto picks the GPU when the model fits on it
     #[arg(long, value_enum, default_value_t = Device::Auto, ignore_case = true)]
     device: Device,
-    /// Most layers on the GPU; the rest run on the CPU [default: as many as fit]
+    /// Most layers on the GPU, the last ones, the rest on the CPU;
+    /// llama.cpp's -ngl takes the first [default: as many as fit]
     #[arg(long, value_name = "N")]
     gpu_layers: Option<usize>,
     /// CUDA GPUs to spread the model's layers over, in CUDA's order as
