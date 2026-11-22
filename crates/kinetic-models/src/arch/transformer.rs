@@ -1,6 +1,7 @@
-//! Plain transformers: Llama (with Mistral and SmolLM), Qwen2, Qwen3,
-//! Gemma 3, ERNIE 4.5, Hunyuan, EXAONE 4 and OLMo 2. Every layer is
-//! grouped-query attention followed by a gated feed-forward. They differ in
+//! Plain transformers: Llama (with Mistral and SmolLM), Qwen2, Qwen3 (with
+//! its mixture-of-experts variant), Gemma 3, ERNIE 4.5, Hunyuan, EXAONE 4 and
+//! OLMo 2. Every layer is grouped-query attention followed by a gated
+//! feed-forward, or by routed experts where the file has a router. They differ in
 //! the rotary layout, in optional projection biases and query/key norms
 //! (per head or across heads, before or after the rotation), in whether
 //! blocks normalize their input, their output or both, and in Gemma 3's
@@ -22,7 +23,6 @@ const UNSUPPORTED: &[&str] = &[
     "blk.0.ffn_gate.bias",
     "blk.0.ffn_up.bias",
     "blk.0.ffn_down.bias",
-    "blk.0.ffn_gate_inp.weight",
 ];
 
 pub(crate) const FAMILY: Family = Family::decoder(
@@ -30,6 +30,7 @@ pub(crate) const FAMILY: Family = Family::decoder(
         "llama",
         "qwen2",
         "qwen3",
+        "qwen3moe",
         "ernie4_5",
         "hunyuan-dense",
         "exaone4",
@@ -171,16 +172,28 @@ pub(crate) fn layers<'a>(
             } else {
                 Activation::Silu
             };
+            // A file that routes tokens to experts has no dense
+            // feed-forward; its experts are as wide as the file says.
+            let (ffn, experts) = match l.header().tensor(&t("ffn_gate_inp.weight")) {
+                Some(_) => {
+                    let n_ff = l.usize_or("expert_feed_forward_length", n_ff)?;
+                    (None, Some(super::moe::routed(l, i, d, n_ff)?))
+                }
+                None => (
+                    Some(SwiGlu {
+                        activation,
+                        ..l.swiglu(i, d, n_ff)?
+                    }),
+                    None,
+                ),
+            };
             Ok(Layer {
                 mixer_norm: input_norm(&t("attn_norm.weight"))?,
                 mixer: Mixer::Attention(attention),
                 mixer_out_norm: l.optional_vector(&t("post_attention_norm.weight"), d)?,
                 ffn_norm: input_norm(&t("ffn_norm.weight"))?,
-                ffn: Some(SwiGlu {
-                    activation,
-                    ..l.swiglu(i, d, n_ff)?
-                }),
-                experts: None,
+                ffn,
+                experts,
                 ffn_out_norm: l.optional_vector(&t("post_ffw_norm.weight"), d)?,
                 residual_scale: None,
                 out_scale: None,
