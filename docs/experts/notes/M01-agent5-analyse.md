@@ -53,19 +53,20 @@ missions. Le squelette ledger/configs/THEORY n'existe pas encore.
 ## 4. État du dépôt (impact sur la reproductibilité)
 
 - Branche `main`, HEAD `8f64626` (« Record where the host spill really goes on
-  Vulkan »).
-- **Arbre de travail sale** : `crates/kinetic-models/src/blocks/moe.rs` modifié
-  (+106/−1), instrumentation temporaire `KINETIC_PROFILE=1` (timers par étape du
-  bloc MoE). Ce n'est pas du code de production, mais il rend le binaire local
-  différent de `8f64626` → **toute baseline doit noter ce point** ou être faite
-  sur un arbre propre.
-- Non suivis : `docs/experts.md`, `docs/experts/` (ce document), et deux
-  transcriptions `session-*.md` à la racine (bruit, à ne pas committer).
-- `PLAN.md` contient **au moins une entrée périmée** : la section « Mesures
-  pp512 / tg128 du 35B » affirme que kinetic « n'a pas de découpe de couches sur
-  Vulkan » et que `kinetic bench` « n'a pas de `--gpu-layers` à proposer », ce que
-  G8 (`2c6c03b`) contredit dans le même journal. Les deux entrées sont datées du
-  22 nov. À corriger (PLAN.md est dans le périmètre d'écriture Agent 5).
+  Vulkan »), puis `6b6e4a0` (« Profile a CPU layer of the 35B and place its cost »).
+- ~~Arbre de travail sale~~ **résolu** : l'instrumentation `KINETIC_PROFILE` a été
+  retirée ; ses conclusions sont consignées dans `PLAN.md` par `6b6e4a0`. L'arbre
+  est propre et le binaire `target/release/kinetic` correspond à HEAD.
+- ~~Non suivis~~ **résolu** : tout le travail courant est committé (423372a) et
+  poussé sur `fork/main`.
+- ~~`PLAN.md` entrée périmée~~ **résolu** : la section « Mesures pp512 / tg128 du
+  35B » a été remise au passé et renvoie à la mesure de découpe de G8 (ab0fe06).
+- **Base vérifiée (f000853)** : `cargo fmt` appliqué partout, trois avertissements
+  clippy corrigés (`div_ceil`, `too_many_arguments` sur `moe_combine` et le bench
+  CLI, test MoE nettoyé) ; `cargo clippy --release -D warnings` vert,
+  `cargo test --release --workspace` 65/65 binaires verts, scripts Python
+  compilables. La baseline part donc d'un HEAD committé, poussé, et d'un binaire
+  release reconstruit correspondant exactement à ce HEAD.
 
 ## 5. Audit du harnais existant
 
@@ -104,16 +105,18 @@ missions. Le squelette ledger/configs/THEORY n'existe pas encore.
 
 ## 7. Propositions de baseline (à confirmer avant exécution)
 
-- Périmètre minimal reproductible : **35B A3B Q4_K_M** (dense-spill, 21 Gio) et
-  **30B A3B IQ3_XXS** (MoE qui tient, 12 Gio) sur Vulkan, plus le **27B IQ3_XXS**
-  en contrôle de non-régression ; CPU 7800X3D en référence x86.
+- Périmètre de modèles : **tous** les modèles de
+  `~/.local/share/kinetic/models/local/`, sans distinction (13 familles, de
+  qwen3-vl-4b à qwen3.8-35b-a3b), chacun mesuré sur son backend de service
+  (Vulkan quand il tient, découpe ou CPU sinon) ; dense 27B et MoE 30B A3B
+  restent les pivots des rapports M01.
 - Pour chacun : `pp512`, `pp2048`, `tg128` (médiane de 6, `-r 6`), pic VRAM
   (`rocm-smi`), TTFT et temps de chargement, contre `llama-bench -dev Vulkan0`
   avec le même nombre de couches sur le périphérique.
 - Gates : `edit_identical: true` (test d'édition de `kinetic bench`), sortie
   gloutonne non dégénérée, un seul job GPU à la fois, machine idle.
-- Prérequis avant le premier chiffre : décider du traitement de `moe.rs`
-  instrumenté (stash ou baseline documentée sur arbre sale).
+- Prérequis levés : arbre propre committé et poussé (`f000853`), CI gates
+  (fmt/clippy/tests) vertes, binaire release synchronisé avec HEAD.
 
 ## 8. Risques / points d'arrêt
 
