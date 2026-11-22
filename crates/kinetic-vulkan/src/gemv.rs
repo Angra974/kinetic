@@ -34,8 +34,12 @@ fn block_len(ty: TensorType) -> Option<usize> {
     Some(match ty {
         TensorType::F32 => 4,
         TensorType::F16 => 8,
-        TensorType::Q8_0 => 32,
-        TensorType::Q4K | TensorType::Q5K | TensorType::Q6K => 256,
+        TensorType::Q8_0 | TensorType::Q4_0 => 32,
+        TensorType::Q4K
+        | TensorType::Q5K
+        | TensorType::Q6K
+        | TensorType::IQ3XXS
+        | TensorType::IQ4XS => 256,
         _ => return None,
     })
 }
@@ -382,6 +386,9 @@ impl Kernels {
             TensorType::Q4K => &self.gemv_q4_k,
             TensorType::Q5K => &self.gemv_q5_k,
             TensorType::Q6K => &self.gemv_q6_k,
+            TensorType::IQ3XXS => &self.gemv_iq3_xxs,
+            TensorType::IQ4XS => &self.gemv_iq4_xs,
+            TensorType::Q4_0 => &self.gemv_q4_0,
             _ => unreachable!("block_len admits only types with kernels"),
         };
         (kernel, ROWS_PER_GROUP)
