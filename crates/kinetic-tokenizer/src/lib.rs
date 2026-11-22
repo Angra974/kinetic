@@ -101,6 +101,7 @@ impl Tokenizer {
                         (pretokenize::LLAMA3, true, true)
                     }
                     "dbrx" => (pretokenize::LLAMA3, false, false),
+                    "tekken" | "pixtral" => (pretokenize::TEKKEN, true, true),
                     "smollm" | "refact" => (pretokenize::SMOLLM, false, false),
                     "gpt-2" | "exaone4" => (pretokenize::GPT2, false, false),
                     "hunyuan-dense" => (pretokenize::HUNYUAN, false, false),
@@ -247,6 +248,12 @@ impl Tokenizer {
     }
 
     /// The end-of-sequence token, if the model has one.
+    /// Whether `id` is a control token, markup such as `<|im_start|>` that
+    /// the model writes between turns rather than text to show.
+    pub fn control(&self, id: u32) -> bool {
+        self.model.specials().control(id)
+    }
+
     pub fn eos(&self) -> Option<u32> {
         self.eos
     }

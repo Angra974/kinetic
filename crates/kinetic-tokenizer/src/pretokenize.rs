@@ -26,6 +26,21 @@
 //! matched the same way, optionally after first cutting every digit out as
 //! a piece of its own.
 //!
+//! The Tekken (Mistral) pattern is
+//!
+//! ```text
+//! [^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+
+//! |[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*
+//! |\p{N}
+//! | ?[^\s\p{L}\p{N}]+[\r\n/]*
+//! |\s*[\r\n]+
+//! |\s+(?!\S)
+//! |\s+
+//! ```
+//!
+//! which breaks a word where case changes from upper to lower (`camelCase`
+//! becomes `camel` and `Case`) and keeps one digit per piece.
+//!
 //! The Hunyuan pattern first cuts out runs of up to three digits, then runs
 //! of Han and kana, and splits what is left with
 //!
@@ -55,6 +70,7 @@ pub(crate) enum Pattern {
         digits_alone: bool,
     },
     Hunyuan,
+    Tekken,
 }
 
 /// `qwen35`: marks join words, digits stand alone.
@@ -86,6 +102,9 @@ pub(crate) const SMOLLM: Pattern = Pattern::Gpt2 { digits_alone: true };
 /// `hunyuan-dense`.
 pub(crate) const HUNYUAN: Pattern = Pattern::Hunyuan;
 
+/// `tekken`, the Mistral tokenizer; `pixtral` shares it.
+pub(crate) const TEKKEN: Pattern = Pattern::Tekken;
+
 impl Pattern {
     pub(crate) fn split(self, text: &str) -> Pieces<'_> {
         Pieces {
@@ -103,7 +122,70 @@ impl Pattern {
             } => llama3_len(s, marks_in_words, max_digits),
             Pattern::Gpt2 { digits_alone } => gpt2_len(s, digits_alone),
             Pattern::Hunyuan => hunyuan_len(s),
+            Pattern::Tekken => tekken_len(s),
         }
+    }
+}
+
+/// Case-aware words, one digit per piece, and a symbol carrying the word
+/// after it, as Mistral's tokenizer splits.
+fn tekken_len(s: &str) -> usize {
+    let first = s.chars().next().expect("match_len needs text");
+    let class = classify(first);
+    let first_len = first.len_utf8();
+    // a letter or a mark: what the pattern's word alternatives cover
+    let letter = |c: char| matches!(classify(c), Class::Letter | Class::Mark);
+    let upper = |c: char| letter(c) && !c.is_lowercase();
+    let lower = |c: char| letter(c) && !c.is_uppercase();
+
+    if !matches!(class, Class::Letter | Class::Number | Class::Newline) {
+        if let Some(len) = tekken_word(&s[first_len..], upper, lower) {
+            return first_len + len;
+        }
+    }
+    if let Some(len) = tekken_word(s, upper, lower) {
+        return len;
+    }
+
+    if class == Class::Number {
+        return first_len;
+    }
+
+    let is_symbol = |c: Class| matches!(c, Class::Other | Class::Mark);
+    let lead = usize::from(first == ' ');
+    let body = &s[lead..];
+    if body.chars().next().map(classify).is_some_and(is_symbol) {
+        let end = lead + span(body, is_symbol);
+        let newlines = s.as_bytes()[end..]
+            .iter()
+            .take_while(|&&b| b == b'\r' || b == b'\n' || b == b'/')
+            .count();
+        return end + newlines;
+    }
+
+    whitespace_len(s)
+}
+
+/// The length of an upper run followed by a lower one, either of them
+/// possibly empty but not both; `None` when `s` holds no letter.
+fn tekken_word(
+    s: &str,
+    upper: impl Fn(char) -> bool,
+    lower: impl Fn(char) -> bool,
+) -> Option<usize> {
+    let head = s
+        .char_indices()
+        .find(|&(_, c)| !upper(c))
+        .map_or(s.len(), |(i, _)| i);
+    let tail = &s[head..];
+    let rest = tail
+        .char_indices()
+        .find(|&(_, c)| !lower(c))
+        .map_or(tail.len(), |(i, _)| i);
+    match (head > 0, rest > 0) {
+        (true, _) => Some(head + rest),
+        (false, true) => Some(rest),
+        (false, false) => None,
     }
 }
 

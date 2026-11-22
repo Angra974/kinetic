@@ -68,11 +68,22 @@ Dépôt : fork `Angra974/kinetic`, remote `fork`, branche unique `main`. `upstre
 Le document les met en premier parce qu'ils sont petits et qu'un client existant en
 dépend. Aucun backend à toucher.
 
-- Sampling : `dynatemp_range`, `dynatemp_exponent`, `adaptive_target`,
-  `adaptive_decay`, `min_keep`, `ignore_eos`, `reasoning_budget`, ordre de samplers.
-  Cœur : `kinetic-models/src/speculative/sampler.rs`, filtres dans `filters.rs`.
-- Routes : `POST /props`, `POST /slots/:id_slot`, `/infill`, `/apply-template`,
-  `/lora-adapters`, `n > 1`, `timings_per_token`.
+**Sampling : fait (voir G3).** `dynatemp_range`, `dynatemp_exponent`, `min_keep`,
+`adaptive_target`, `adaptive_decay` vivent dans le sampler partagé
+(`kinetic-models/src/speculative/sampler.rs`, filtres dans `filters.rs`) ; `ignore_eos`
+et `reasoning_budget_tokens` y vivent aussi, mais c'est le moteur qui les applique, là où
+les tokens d'arrêt et l'état du raisonnement sont connus (`engine.rs`).
+
+Deux choix assumés, qui ne copient pas llama.cpp :
+
+- `ignore_eos` retire **tous** les tokens de fin (eos et marqueurs de fin de tour) et
+  n'affiche jamais le texte des tokens de contrôle ; llama.cpp biaise leurs logits.
+- `reasoning_budget_tokens` termine le tour quand le budget est dépensé. llama.cpp
+  écrit le tag de fermeture à la place du modèle, puis laisse répondre ; Kinetic ne
+  modifie pas la sortie du modèle, donc pas de réponse après le budget.
+
+**Routes : reste à faire.** `POST /props`, `POST /slots/:id_slot`, `/infill`,
+`/apply-template`, `/lora-adapters`, `n > 1`, `timings_per_token`.
 - Preuve : requêtes de référence (llama-server) rejouées avec les mêmes champs.
 
 ### P0.2 — Vulkan (L)
@@ -105,8 +116,10 @@ que le GEMM attaque moins cher.
 
 ### P0.5 — Prétokenizers et split GGUF (S/M)
 
-- Les 15 prétokenizers les plus fréquents, dont **`tekken`** (bloque
-  `helcyon-gpt-4o-v4.5`), puis UGM (T5), RWKV, PLaMo.
+- **`tekken` (et `pixtral`) : fait (voir G4).** `helcyon-gpt-4o-v4.5` se charge et
+  génère sur Vulkan.
+- Restent UGM (T5), RWKV, PLaMo, et le variant `tekken-num3` (nombres par groupes de
+  trois à droite) si un modèle l'exige.
 - Tokens EOT/EOM/FIM et types de tokens spéciaux.
 - Split GGUF en lecture.
 - Preuve : mêmes ids que `llama-tokenize`.
@@ -172,9 +185,28 @@ les bénéficiaires NVIDIA ne sont pas concernés par ce journal.
 |---|---|---|---|---|
 | G1 | Types `IQ3_XXS`, `IQ4_XS`, `Q4_0` refusés sur Vulkan | `0127427` | 27B sur GPU, sortie cohérente, 6+20+1 tests | CPU 3,8 → 154,8 t/s pp512 |
 | G2 | Passe prompt sans noyau many-token pour ces types | `85d29aa` | bit-exact conservé, tests verts | pp512 154,8 → 261,9 t/s ; résidu 4,4× vers P0.2 |
+| G3 | Sampling de llama-server absent : `dynatemp_range/exponent`, `min_keep`, `adaptive_target/decay`, `ignore_eos`, `reasoning_budget_tokens` | non committé | mêmes requêtes rejouées sur les deux serveurs, 22 nov., L3-8B IQ4_XS et Qwen3.5-9B Q4_K_M ; 174 tests unitaires verts (91 modèles + 83 serveur) | champs acceptés des deux côtés ; `ignore_eos` passe de `stop` 4 car. à `length` 167 car. ; budget 8 → 8 tokens de raisonnement contre 200 sans budget |
+| G4 | Prétokenizer `tekken` absent : `helcyon-gpt-4o-v4.5` refusé au chargement | non committé | mêmes ids que `llama-tokenize` sur 26 lignes de contrôle et sur un fichier entier (83 tokens, identiques), 22 nov. ; 28 tests tokenizer verts ; génération Vulkan 77,3 t/s | le modèle se charge et génère |
 
-Ces deux entrées ferment une partie de **§4.3 formats** et amorcent **P0.2** ; elles ne
-ferment aucun autre domaine.
+G1 et G2 ferment une partie de **§4.3 formats** et amorcent **P0.2** ; G3 ferme la
+partie sampling de **P0.1**, pas ses routes ; G4 ferme la partie `tekken` de **P0.5**.
+
+### Mesures de G3 (22 nov. 2026)
+
+Même requête, même fichier, un seul serveur GPU à la fois ; llama.cpp `19bc41dbb`
+(Vulkan0) contre kinetic `main` + ce lot.
+
+| Requête | llama-server | kinetic |
+|---|---|---|
+| chat, température 0 | `stop`, « Done » (4 car.) | `stop`, « Done » (4 car.) |
+| idem + `ignore_eos` | `length`, 19 car. | `length`, 167 car. |
+| `dynatemp_range` 0,8 / exp 1 | HTTP 200, 101 car. | HTTP 200, 96 car. |
+| `top_p` 0 + `min_keep` 5 | HTTP 200, 109 car. | HTTP 200, 109 car. |
+| `adaptive_target` 0,5 / `decay` 0,9 | HTTP 200, 103 car. | HTTP 200, 96 car. |
+| `reasoning_budget_tokens` 8 (Qwen3.5-9B, réflexion) | HTTP 200, sans effet sur ce couple | 8 tokens de raisonnement, `length` |
+
+Les tirages ne sont pas identiques d'un serveur à l'autre (RNG différents) : la preuve
+porte sur l'effet des champs, pas sur l'égalité des tokens.
 
 ## 6. Ce qui n'est pas dans ce journal
 

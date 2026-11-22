@@ -104,6 +104,27 @@ fn qwen35_splits_words_digits_and_punctuation() {
 }
 
 #[test]
+fn tekken_splits_at_case_changes_and_keeps_one_digit_a_piece() {
+    assert_eq!(
+        pieces(pretokenize::TEKKEN, "camelCase HTTPServer 2024"),
+        // a lower-to-upper change splits; upper-to-lower does not
+        [
+            "camel", "Case", " HTTPServer", " ", "2", "0", "2", "4"
+        ]
+    );
+    // one run of letters keeps together; symbols and a leading space go
+    // with the piece they start, never with the word after them
+    assert_eq!(
+        pieces(pretokenize::TEKKEN, "Hello !word naïve 日本語"),
+        ["Hello", " !", "word", " naïve", " 日本語"]
+    );
+    assert_eq!(
+        pieces(pretokenize::TEKKEN, "aAb\n\n  x"),
+        ["a", "Ab", "\n\n", " ", " x"]
+    );
+}
+
+#[test]
 fn llama3_groups_three_digits() {
     assert_eq!(
         pieces(pretokenize::LLAMA3, "x 1234567"),
@@ -568,6 +589,11 @@ fn random_text_never_panics_and_byte_level_round_trips() {
     .collect();
     let others = [
         Builder::new("lfm2")
+            .token("<s>", 3)
+            .kv("tokenizer.ggml.bos_token_id", Value::U32(256))
+            .build(),
+        // tekken adds BOS, so it needs an id like lfm2
+        Builder::new("tekken")
             .token("<s>", 3)
             .kv("tokenizer.ggml.bos_token_id", Value::U32(256))
             .build(),

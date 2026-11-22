@@ -45,6 +45,12 @@ impl Specials {
         }
     }
 
+    /// Whether `id` is a control token: markup the model emits between turns
+    /// rather than text to show.
+    pub(crate) fn control(&self, id: u32) -> bool {
+        self.tokens.iter().any(|t| t.id == id && t.control)
+    }
+
     /// Splits `text` the way the reference does: each special token, longest
     /// first, claims its leftmost non-overlapping occurrences in the text not
     /// yet claimed by a longer one.
