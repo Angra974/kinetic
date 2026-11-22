@@ -194,6 +194,7 @@ les bénéficiaires NVIDIA ne sont pas concernés par ce journal.
 | G3 | Sampling de llama-server absent : `dynatemp_range/exponent`, `min_keep`, `adaptive_target/decay`, `ignore_eos`, `reasoning_budget_tokens` | non committé | mêmes requêtes rejouées sur les deux serveurs, 22 nov., L3-8B IQ4_XS et Qwen3.5-9B Q4_K_M ; 174 tests unitaires verts (91 modèles + 83 serveur) | champs acceptés des deux côtés ; `ignore_eos` passe de `stop` 4 car. à `length` 167 car. ; budget 8 → 8 tokens de raisonnement contre 200 sans budget |
 | G5 | `qwen3moe` refusé au chargement, experts routés et IQ3_S absents du Vulkan : le 30B A3B retombait sur le CPU | `6141b3b`, `7714f86`, `c729c30` | même fichier chargé sur Vulkan, 1er token identique à la CPU, sorties cohérentes ; passe routée comparée au host sur 3 tokens et 3 types d'experts ; 91 tests modèles + 21 GEMV + 1 MoE verts | le modèle tourne sur GPU : pp512 489 t/s, tg128 55,7 t/s |
 | G6 | `qwen35moe` refusé sur Vulkan (expert partagé, routage sigmoïde) et experts Q4_K/Q6_K sans noyau groupé : le 35B A3B retombait sur le CPU | `5457f06` | 6 tests MoE contre le host (sigmoïde gated/plain, Q4_K, Q6_K) et 34 tests `kinetic-vulkan` verts ; le fichier se charge et génère sur Vulkan | génération 11,9 → 26,8 t/s, prompt 16,5 → 91 t/s |
+| G7 | Un modèle plus gros que la VRAM déversait en RAM système tout ce qu'il téléversait en dernier, tête de sortie et poids denses compris, relus à chaque token par le bus | `7598ca2` | profil par timestamps GPU : tête 16,4 → 1,45 ms par token, couches 29-40 à 2,5 ms contre 0,66 ms pour les précédentes ; même sortie au token près ; 34 tests `kinetic-vulkan` verts | génération 25,7 → 33,5 t/s, préfill 92,6 → 92,9 t/s |
 | G4 | Prétokenizer `tekken` absent : `helcyon-gpt-4o-v4.5` refusé au chargement | non committé | mêmes ids que `llama-tokenize` sur 26 lignes de contrôle et sur un fichier entier (83 tokens, identiques), 22 nov. ; 28 tests tokenizer verts ; génération Vulkan 77,3 t/s | le modèle se charge et génère |
 
 G1 et G2 ferment une partie de **§4.3 formats** et amorcent **P0.2** ; G3 ferme la
@@ -217,6 +218,41 @@ décodage reste 1,5× sous llama. `--gpu-layers` balayé de 24 à 41 : plateau d
 où les poids débordent en mémoire hôte. Le décodage ne dépend donc presque pas
 du nombre de couches placées : il est borné par les experts lus en mémoire hôte,
 pas par le calcul GPU.
+
+### Profil de décodage du 35B (22 nov. 2026)
+
+Où part le temps d'un token de `qwen3.8-35b-a3b` sur Vulkan, mesuré par
+timestamps GPU (deux sondes : après les 41 couches, après la tête), même
+prompt, 40 tokens à température 0, `-c 8192`.
+
+| Poste | Avant | Après |
+|---|---:|---:|
+| tête de sortie, 248 320 × 2048 Q6_K | 16,4 ms | 1,45 ms |
+| couches 1-28 | 0,66 ms par couche | 0,66 ms par couche |
+| couches 29-40 | 2,5 ms par couche | — |
+| génération | 25,7 t/s | 33,5 t/s |
+| préfill, 18 tokens | 92,6 t/s | 92,9 t/s |
+
+La cause n'est pas le calcul : 20,6 Go de poids pour 16 Go de VRAM, et
+`Allocation::new` déverse en RAM système (`HOST_SPILL`) ce qui ne tient plus,
+dans l'ordre du téléversement. La tête était donc téléversée en dernier après
+les 41 couches, et les 12 dernières couches — tête de sortie comprise —
+étaient relues à chaque token par le PCIe (`mem_info_vram_used` culminait à
+16 202 Mio). Deux corrections de placement, sans toucher aux noyaux :
+
+- la tête et sa norme prennent leur place avant les couches ;
+- tous les poids denses (attention, expert partagé, routeur, normes) sont
+téléversés avant les experts routés, qui prennent le débordement : un token
+  en lit un sur `n_experts`, contre la totalité des poids denses.
+
+`DeviceExperts` gagne l'allocation et la copie séparées (`reserve`, `fill`)
+pour permettre ce second passage ; la copie d'un expert est inchangée. Le
+préfill ne bouge pas : il est borné par le calcul, pas par le bus.
+
+Ce qui reste : les experts hébergés en RAM système coûtent encore leur lecture
+PCIe à chaque token. Les exécuter sur le CPU pour les couches concernées, comme
+le fait llama.cpp avec `-ngl`, remplacerait ce bus par la RAM à pleine bande ;
+c'est une découpe GPU/CPU pour le backend Vulkan, pas un réglage.
 
 ### Mesures de G5 (22 nov. 2026)
 
