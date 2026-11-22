@@ -41,6 +41,13 @@
     "prefill": 250.93448750559372,
     "repetitions": 6
   },
+  "ci-baseline": {
+    "decode": 153.28603433275447,
+    "device": "vulkan",
+    "edit": 715.8309083168647,
+    "prefill": 1360.7035919755087,
+    "repetitions": 6
+  },
   "gemma-4-12b-heretic-Q5_K_M": {
     "decode": 59.79598603672538,
     "device": "vulkan",
