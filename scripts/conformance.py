@@ -19,6 +19,11 @@ Device `vulkan` asks the kinetic server for Vulkan (the server default is
 its own choice) and leaves llama.cpp at `-ngl 99`, which its Vulkan build
 binds to Vulkan0; pass `--llama-dev Vulkan0` to pin llama.cpp's device
 explicitly.
+
+With `--against kinetic-cpu`, the reference is not llama.cpp but a second
+kinetic server on the CPU, and the greedy texts are compared directly:
+this is the Vulkan-vs-CPU cross-check the M01 acceptance criteria ask
+for.
 """
 
 import argparse
@@ -115,6 +120,22 @@ def llama_runs(a):
         return out
 
 
+def kinetic_cpu_texts(a):
+    port = a.port + 1
+    args = [a.kinetic, "serve", a.model, "--port", str(port), "--device", "cpu",
+            "--parallel", "1", "--no-prompt-cache", "-c", "4096"]
+    base = f"http://127.0.0.1:{port}"
+    with Server(args, base + "/health"):
+        out = []
+        for p in PROMPTS:
+            body = {"prompt": p, "max_tokens": a.n, "temperature": 0, "top_k": 1,
+                    "repeat_penalty": 1.0}
+            text = post(base + "/v1/completions", body)["choices"][0]["text"]
+            r = post(base + "/v1/completions", {**body, "logprobs": 1})
+            out.append((text, r["choices"][0]["logprobs"]["tokens"]))
+        return out
+
+
 def logprob(entry):
     # newer servers send logprob, older ones prob
     if "logprob" in entry:
@@ -153,10 +174,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("model")
     ap.add_argument("--kinetic", default="kinetic")
-    ap.add_argument("--llama", required=True, help="folder with llama-server")
+    ap.add_argument("--llama", help="folder with llama-server")
     ap.add_argument("--device", choices=["cpu", "cuda", "vulkan"], default="cpu")
     ap.add_argument("--llama-dev", default=None,
                     help="pin llama.cpp's device, e.g. Vulkan0 or CUDA0")
+    ap.add_argument("--against", choices=["llama", "kinetic-cpu"], default="llama",
+                    help="reference: llama.cpp or this same kinetic on the CPU")
     ap.add_argument("-n", type=int, default=64, help="tokens per prompt")
     ap.add_argument("--port", type=int, default=18080)
     ap.add_argument("--llama-arg", action="append", default=[],
@@ -166,9 +189,31 @@ def main():
     a = ap.parse_args()
 
     texts = kinetic_texts(a)
-    runs = llama_runs(a)
-    print(f"{os.path.basename(a.model)} on {a.device}, {a.n} greedy tokens per prompt")
+    print(f"{os.path.basename(a.model)} on {a.device} against {a.against}, "
+          f"{a.n} greedy tokens per prompt")
     failed = False
+    if a.against == "kinetic-cpu":
+        refs = kinetic_cpu_texts(a)
+        total = agreed_all = 0
+        for k, ((text, tokens), (ref_text, ref_tokens)) in enumerate(zip(texts, refs)):
+            if text != ref_text:
+                print(f"prompt {k + 1}: a side changes its text with logprobs")
+                failed = True
+                continue
+            n = min(len(tokens), len(ref_tokens))
+            agree = next((i for i in range(n)
+                          if tokens[i] != ref_tokens[i]), n)
+            total += n
+            agreed_all += agree
+            line = f"prompt {k + 1}: {agree}/{n} tokens agree"
+            if n and agree < n:
+                line += (f"; vulkan {tokens[agree]!r} "
+                         f"vs cpu {ref_tokens[agree]!r} at {agree}")
+                failed |= agree < a.early
+            print(line)
+        print(f"total: {agreed_all}/{total} tokens agree")
+        sys.exit(1 if failed else 0)
+    runs = llama_runs(a)
     total = agreed_all = 0
     for k, ((text, tokens), steps) in enumerate(zip(texts, runs)):
         if "".join(tokens) != text:

@@ -534,14 +534,15 @@ Unlimited-OCR, Offrail Vulkan).
 | `conformance.py --device vulkan` | fait — 256/256 tokens d'accord sur le 4B |
 | needle 50/100 % | fait — PASS à 8k **et** 32k de contexte |
 | soak + watchdog | fait — 4 puis 16 slots × 512 tokens, 180 puis 282 t/s agrégés, sans déclenchement |
-| CI GPU | workflow + gate prêts ; branchement du runner auto-hébergé à faire côté GitHub |
-| Baseline dense 27B / MoE 30B | consignée ci-dessus et dans `docs/src/benchmarks.md`, avec pp2048 |
+| CI GPU | **verte** — runner `pop-os` `[self-hosted, Linux, X64, gpu]` enregistré via `gh`, deux runs `gpu.yml` success (`workflow_dispatch` et `push`), gate 5 % imprimant ses trois métriques et comparant contre `best-config.json` |
+| `conformance.py` | **Vulkan vs CPU** : 192/192 tokens d'accord sur les prompts stables ; le prompt 3 révèle que le glouton kinetic n'est **pas stable entre démarrages de serveur** (proche-égalité de logits, les deux backends), chaque passe restant déterministe en interne — consigné au ledger, à investiguer (pertinent pour les gates d'identité) |
 | Rapport de baseline dans `PLAN.md` | fait |
 
 Reste ouvert pour clore M01 : le GEMM synthétique direct dans la sonde, le
-relevé `top_k`/`n_experts` par modèle, le branchement du runner auto-hébergé
-côté GitHub, et les quatre modèles non supportés (qwen3vl, PaddleOCR-VL,
-Unlimited-OCR, Offrail Vulkan).
+relevé `top_k`/`n_experts` par modèle, et les quatre modèles non supportés
+(qwen3vl, PaddleOCR-VL, Unlimited-OCR, Offrail Vulkan) — plus, découvert par la
+conformance Vulkan/CPU : la stabilité inter-démarrages du glouton sur un prompt
+proche-égalité (les deux backends), à traiter avec les gates d'identité.
 
 ## 6. Ce qui n'est pas dans ce journal
 
