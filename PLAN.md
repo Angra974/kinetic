@@ -254,6 +254,32 @@ PCIe à chaque token. Les exécuter sur le CPU pour les couches concernées, com
 le fait llama.cpp avec `-ngl`, remplacerait ce bus par la RAM à pleine bande ;
 c'est une découpe GPU/CPU pour le backend Vulkan, pas un réglage.
 
+### Mesures pp512 / tg128 du 35B (22 nov. 2026)
+
+`kinetic bench --device vulkan -r 1` contre
+`llama-bench -dev Vulkan0 -ngl 31 -p 512 -n 128 -r 1`, même fichier, un seul
+job GPU à la fois, deux passes de chaque côté.
+
+| Test | llama-bench `-ngl 31` | kinetic `bench` |
+|---|---:|---:|
+| pp512 | 642,67 t/s | 198,0-202,4 t/s |
+| tg128 | 43,33 t/s | 29,9-30,2 t/s |
+| pic VRAM | 15 981 Mio | 16 185 Mio |
+
+Les deux configurations ne sont pas identiques, faute d'équivalent : llama garde
+31 couches sur le périphérique et calcule les 10 autres, experts compris, sur le
+CPU ; kinetic n'a pas de découpe de couches sur Vulkan, met les 40 sur le
+périphérique et laisse 4,4 Go déborder en RAM système, relus par le bus une fois
+par passe. `kinetic bench` n'a donc pas de `--gpu-layers` à proposer : le backend
+Vulkan ne le lit pas (`kinetic run` l'accepte et l'ignore de même), c'est le
+`HOST_SPILL` qui décide de ce qui reste en VRAM.
+
+La passe many-token mesurée ici (512 tokens) nuance la lecture du prompt court de
+G6 : à 18 tokens kinetic était devant (91 contre 82 t/s), mais à 512 il est 3,2×
+sous llama. Le préfill est borné par le calcul, et c'est le résidu P0.2 des noyaux
+many-token, pas le placement des poids — le débordement ne coûte qu'une lecture
+par passe, pas par token.
+
 ### Mesures de G5 (22 nov. 2026)
 
 `qwen3-coder-30b-a3b-instruct` UD-IQ3_XXS (11,97 Gio), un seul job GPU à la fois,
