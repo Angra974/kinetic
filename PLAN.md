@@ -213,11 +213,14 @@ partie sampling de **P0.1**, pas ses routes ; G4 ferme la partie `tekken` de **P
 
 kinetic sur CPU pour la même requête : 11,9 t/s en génération, 16,5 t/s en
 prompt. Le GPU double le débit de Kinetic et le préfill dépasse llama, mais le
-décodage reste 1,5× sous llama. `--gpu-layers` balayé de 24 à 41 : plateau de
-26 à 27 t/s jusqu'à 34 couches (optimum 27,2 à 34), puis 25,0 à 38 et 24,4 à 41
-où les poids débordent en mémoire hôte. Le décodage ne dépend donc presque pas
-du nombre de couches placées : il est borné par les experts lus en mémoire hôte,
-pas par le calcul GPU.
+décodage reste 1,5× sous llama.
+
+Le balayage `--gpu-layers` 24 → 41 alors consigné (26,3 à 24,4 t/s, « plateau »)
+ne mesurait rien : le backend Vulkan ne lit pas ce drapeau, place les 40 couches
+d'office, et seule la taille de la VRAM décide de ce qui déborde. Les 2 t/s
+d'écart entre les passes étaient du bruit. Le décodage est borné par ce que le bus
+relit à chaque token, ce que G7 a mesuré par timestamps GPU puis corrigé par le
+placement des poids.
 
 ### Profil de décodage du 35B (22 nov. 2026)
 
