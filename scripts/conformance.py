@@ -14,6 +14,11 @@ run's.
 
 Standard library only. Exits 1 when a prompt parts before --early tokens
 without a near-tie.
+
+Device `vulkan` asks the kinetic server for Vulkan (the server default is
+its own choice) and leaves llama.cpp at `-ngl 99`, which its Vulkan build
+binds to Vulkan0; pass `--llama-dev Vulkan0` to pin llama.cpp's device
+explicitly.
 """
 
 import argparse
@@ -96,6 +101,8 @@ def llama_runs(a):
     ngl = "0" if a.device == "cpu" else "99"
     args = [exe, "-m", a.model, "--port", str(port), "-ngl", ngl, "-c", "4096",
             "-np", "1", "--no-warmup"] + a.llama_arg
+    if a.llama_dev:
+        args += ["-dev", a.llama_dev]
     base = f"http://127.0.0.1:{port}"
     with Server(args, base + "/health"):
         out = []
@@ -147,7 +154,9 @@ def main():
     ap.add_argument("model")
     ap.add_argument("--kinetic", default="kinetic")
     ap.add_argument("--llama", required=True, help="folder with llama-server")
-    ap.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    ap.add_argument("--device", choices=["cpu", "cuda", "vulkan"], default="cpu")
+    ap.add_argument("--llama-dev", default=None,
+                    help="pin llama.cpp's device, e.g. Vulkan0 or CUDA0")
     ap.add_argument("-n", type=int, default=64, help="tokens per prompt")
     ap.add_argument("--port", type=int, default=18080)
     ap.add_argument("--llama-arg", action="append", default=[],

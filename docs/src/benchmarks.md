@@ -83,6 +83,34 @@ better. Measured on a laptop with a Ryzen 5 6600H (6 cores, DDR5) and an RTX
 Prompt processing on the GPU (`pp512`) is an area where llama.cpp is ahead
 today; it is on the [roadmap](roadmap.md).
 
+## The RX 9070 XT baseline (M01, 22 November 2026)
+
+Vulkan on an AMD RX 9070 XT (`gfx1201`, 16 GB), kinetic commit `f000853`,
+llama.cpp build `19bc41dbb`, one GPU job at a time, page-cache warm loads,
+six repetitions, best per run; the full record (command, commit, peak VRAM
+and GTT) is in `ledger.jsonl` at the repository root, and `THEORY.md` reads
+these numbers against the hardware ceiling. Kinetic runs `kinetic bench
+--device vulkan -r 6`, llama runs `llama-bench -dev Vulkan0 -ngl 99 -p 512
+-n 128 -r 6` (35B: `-ngl 31`).
+
+| Model | pp512 llama | pp512 kinetic | tg128 llama | tg128 kinetic |
+|---|---:|---:|---:|---:|
+| Qwen3.5-4B Q4_K_M | 5062 | 1361 | 135,2 | **153,3** |
+| L3-8B-Stheno IQ4_XS | 3945 | 913 | 121,5 | 118,7 |
+| Qwen3.5-9B Q4_K_M | 3504 | 872 | 90,7 | **97,9** |
+| gemma-4-12b Q5_K_M | 2419 | 516 | 60,2 | 59,8 |
+| helcyon-gpt-4o Q5_K_M | 2517 | 536 | 66,5 | 65,4 |
+| Qwen3.8-27B IQ3_XXS | 1167 | 264 | **40,7** | 38,7 |
+| Qwen3-Coder-30B-A3B IQ3_XXS | 3522 | 484 | **201,5** | 55,4 |
+| Qwen3.8-35B-A3B Q4_K_M | 751 | 251 | **51,6** | 31,2 |
+
+`edit_identical` was true for all eight. Dense decode sits at the memory
+bandwidth wall already (93–94 % of the measured 500 GB/s reference); the gap
+against llama.cpp is prompt processing (4–7×) and MoE decode (3–7×), which is
+the P0.2 many-token kernel work, not a hardware limit. Four local models do
+not run yet: `qwen3vl`, PaddleOCR-VL, Unlimited-OCR (architectures not
+supported) and Offrail-27B (folded weights not supported on Vulkan).
+
 ## Share your numbers
 
 Results from other hardware are welcome. Open a

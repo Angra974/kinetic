@@ -1,0 +1,10 @@
+{
+  "device": "vulkan",
+  "repetitions": 6,
+  "threads": 16,
+  "context": {
+    "prefill_tokens": 512,
+    "decode_tokens": 128,
+    "edit_tokens": 256
+  }
+}

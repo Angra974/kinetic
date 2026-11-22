@@ -455,6 +455,69 @@ Même requête, même fichier, un seul serveur GPU à la fois ; llama.cpp `19bc4
 Les tirages ne sont pas identiques d'un serveur à l'autre (RNG différents) : la preuve
 porte sur l'effet des champs, pas sur l'égalité des tokens.
 
+### Baseline M01 (22 nov. 2026, commit `f000853`)
+
+Premier passage automatisé du protocole : `scripts/bench_baseline.py` a balayé
+les 8 modèles locaux supportés sur Vulkan, `kinetic bench -r 6` contre
+`llama-bench -dev Vulkan0 -p 512 -n 128 -r 6` (35B à `-ngl 31`), un seul job GPU
+à la fois, arbre propre, `edit_identical` vérifié à chaque passe. Une entrée par
+essai dans `ledger.jsonl`, configuration par modèle dans `configs/`, meilleure
+valeur connue dans `best-config.json`. Chiffres en t/s, kinetic en premier :
+
+| Modèle | pp512 kinetic / llama | tg128 kinetic / llama | VRAM/GTT (Mio) |
+|---|---:|---:|---|
+| Qwen3.5-4B-Q4_K_M | 1361 / 5062 | 153,3 / 135,2 | 3974/681 |
+| L3-8B-Stheno-v3.2-IQ4_XS-imat | 913 / 3945 | 118,7 / 121,5 | 4982/687 |
+| Qwen3.5-9B-Q4_K_M | 872 / 3504 | 97,9 / 90,7 | 5997/700 |
+| gemma-4-12b-heretic-Q5_K_M | 516 / 2419 | 59,8 / 60,2 | 9395/710 |
+| helcyon-gpt-4o-v4.5-Q5_K_M | 536 / 2517 | 65,4 / 66,5 | 9048/666 |
+| Qwen3.8-27B-IQ3_XXS | 264 / 1167 | 38,7 / 40,7 | 12805/687 |
+| Qwen3-Coder-30B-A3B-Instruct-UD-IQ3_XXS | 484 / 3522 | 55,4 / 201,5 | 13048/642 |
+| Qwen3.8-35B-A3B-Q4_K_M | 251 / 751 | 31,2 / 51,6 | 16187/6073 |
+
+`edit_identical: true` sur les huit. Trois modèles locaux ne tournent pas encore
+(résultats négatifs consignés dans le ledger) : `qwen3vl`, PaddleOCR-VL et
+Unlimited-OCR (architecture non supportée), Offrail-27B (poids pliés non
+supportés sur Vulkan ; sa passe CPU est en cours). Les références CPU 7800X3D
+sont prises sur le 4B (pp 150,0 ; tg 14,9), le L3-8B (pp 14,8 ; tg 2,3) et le
+9B (pp 107,6 ; tg 9,3). Offrail-27B, refusé sur Vulkan (poids pliés), a sa
+référence CPU : pp 3,8 ; tg 0,3 t/s — chargeable, presque inutilisable.
+
+Ce que la baseline dit, relu contre `THEORY.md` : le décodage dense est déjà au
+mur de la bande passante (4B à 93 %, 27B à 94 % de l'étalon à ~500 Go/s que
+llama atteint sur un fichier dense résident) ; l'écart avec llama est dans le
+préfill (4–7×) et le décodage MoE (15–30 % du plafond) — le résidu P0.2, pas un
+plafond matériel. La conformance Vulkan contre llama.cpp passe 256/256 tokens
+sur le corpus de contrôle du 4B ; needle trouvé aux deux placements (8003/8192
+tokens) ; soak 4×512×3 tours à 180 t/s agrégés sans déclenchement du watchdog.
+
+Harnais ajouté : `scripts/bench_baseline.py` (balayage + ledger + sondes
+VRAM/GTT), `scripts/ab_protocol.py` (contrôle → candidat → contrôle, portes
+3 %/bruit 5 %), `scripts/regression_gate.py` (seuil de régression, alimente la
+CI), `scripts/needle_test.py`, `scripts/soak_watchdog.py`,
+`.github/workflows/gpu.yml` (runner auto-hébergé, gate 5 %), `conformance.py`
+accepte `--device vulkan`.
+
+### État M01 après la première campagne (22 nov. 2026)
+
+| Livrable | État |
+|---|---|
+| `THEORY.md` | écrit — étalon bande passante ~500 Go/s dérivé du décodage dense llama, efficacité préfill mesurée, plafonds par pivot ; sonde D2D directe encore à faire |
+| `ledger.jsonl` | 24 entrées (16 baseline Vulkan kinetic+llama, 4 baseline CPU, conformance, needle, soak) |
+| `configs/` | une config kinetic + llama par modèle balayé, README du schéma |
+| `best-config.json` | 8 modèles enregistrés, lu par `scripts/regression_gate.py` |
+| `scripts/ab_protocol.py` | écrit — contrôle → candidat → contrôle, portes 3 %/bruit 5 %, verdict au ledger (pas encore d'essai candidat) |
+| `conformance.py --device vulkan` | fait — 256/256 tokens d'accord sur le 4B |
+| needle 50/100 % | fait — PASS aux deux placements (8003/8192 tokens) |
+| soak + watchdog | fait — 4 slots × 512 tokens × 3 tours, 180 t/s agrégés, watchdog armé sans déclenchement |
+| CI GPU | `.github/workflows/gpu.yml` écrit, activation par runner auto-hébergé étiqueté `gpu` + variable `GPU_BASELINE_MODEL` |
+| Baseline dense 27B / MoE 30B | consignée ci-dessus et dans `docs/src/benchmarks.md` |
+
+Reste ouvert pour clore M01 : un essai A/B complet de bout en bout avec un vrai
+candidat, la sonde D2D/GEMM de `THEORY.md`, le runner auto-hébergé branché, le
+balayage multi-requêtes (1/4/16/64) et contexte long (8k/32k), et les quatre
+modèles non supportés (qwen3vl, PaddleOCR-VL, Unlimited-OCR, Offrail Vulkan).
+
 ## 6. Ce qui n'est pas dans ce journal
 
 - Les listes exhaustives (159 architectures, 30 routes, 68 prétokenizers) : elles

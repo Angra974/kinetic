@@ -1,0 +1,58 @@
+{
+  "L3-8B-Stheno-v3.2-IQ4_XS-imat": {
+    "decode": 118.66115714014478,
+    "device": "vulkan",
+    "edit": 429.8482381657223,
+    "prefill": 913.178921864295,
+    "repetitions": 6
+  },
+  "Qwen3-Coder-30B-A3B-Instruct-UD-IQ3_XXS": {
+    "decode": 55.4266238943798,
+    "device": "vulkan",
+    "edit": 273.12517572403544,
+    "prefill": 484.31273269175335,
+    "repetitions": 6
+  },
+  "Qwen3.5-4B-Q4_K_M": {
+    "decode": 153.28603433275447,
+    "device": "vulkan",
+    "edit": 715.8309083168647,
+    "prefill": 1360.7035919755087,
+    "repetitions": 6
+  },
+  "Qwen3.5-9B-Q4_K_M": {
+    "decode": 97.8571282746833,
+    "device": "vulkan",
+    "edit": 444.32529995035173,
+    "prefill": 872.0601150279994,
+    "repetitions": 6
+  },
+  "Qwen3.8-27B-IQ3_XXS": {
+    "decode": 38.712339200968735,
+    "device": "vulkan",
+    "edit": 71.21048393817236,
+    "prefill": 263.6954292493889,
+    "repetitions": 6
+  },
+  "Qwen3.8-35B-A3B-Q4_K_M": {
+    "decode": 31.21141298570296,
+    "device": "vulkan",
+    "edit": 90.59068733085081,
+    "prefill": 250.93448750559372,
+    "repetitions": 6
+  },
+  "gemma-4-12b-heretic-Q5_K_M": {
+    "decode": 59.79598603672538,
+    "device": "vulkan",
+    "edit": 235.38471808167859,
+    "prefill": 516.2086688934174,
+    "repetitions": 6
+  },
+  "helcyon-gpt-4o-v4.5-Q5_K_M": {
+    "decode": 65.44434952979988,
+    "device": "vulkan",
+    "edit": 292.7839014587727,
+    "prefill": 535.6571855027483,
+    "repetitions": 6
+  }
+}

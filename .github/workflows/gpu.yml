@@ -1,0 +1,41 @@
+name: GPU
+
+# Self-hosted GPU runner: runs the Vulkan test suite and the bench
+# regression gate against best-config.json. Skipped entirely when no
+# runner with the `gpu` label is connected, so hosted-only CI keeps
+# working; set GPU_BASELINE_MODEL (and optionally GPU_BASELINE_NGL) as
+# repository variables to enable the bench gate.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gpu-tests:
+    name: vulkan tests and regression gate
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --locked -p kinetic-cli
+      - name: Vulkan exactness tests
+        run: cargo test --release --locked -p kinetic-vulkan
+      - name: One-GPU-job guard
+        run: |
+          # Refuse to start while another bench or server holds the GPU.
+          if pgrep -f "kinetic (bench|serve)|llama-(bench|server)" > /dev/null; then
+            echo "another GPU job is running; retry later"; exit 1
+          fi
+      - name: Baseline regression gate
+        if: ${{ vars.GPU_BASELINE_MODEL != '' }}
+        run: |
+          python3 scripts/regression_gate.py "${{ vars.GPU_BASELINE_MODEL }}" \
+            --device vulkan --repetitions 3 --model-name ci-baseline
