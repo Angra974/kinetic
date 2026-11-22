@@ -195,7 +195,7 @@ les bénéficiaires NVIDIA ne sont pas concernés par ce journal.
 | G5 | `qwen3moe` refusé au chargement, experts routés et IQ3_S absents du Vulkan : le 30B A3B retombait sur le CPU | `6141b3b`, `7714f86`, `c729c30` | même fichier chargé sur Vulkan, 1er token identique à la CPU, sorties cohérentes ; passe routée comparée au host sur 3 tokens et 3 types d'experts ; 91 tests modèles + 21 GEMV + 1 MoE verts | le modèle tourne sur GPU : pp512 489 t/s, tg128 55,7 t/s |
 | G6 | `qwen35moe` refusé sur Vulkan (expert partagé, routage sigmoïde) et experts Q4_K/Q6_K sans noyau groupé : le 35B A3B retombait sur le CPU | `5457f06` | 6 tests MoE contre le host (sigmoïde gated/plain, Q4_K, Q6_K) et 34 tests `kinetic-vulkan` verts ; le fichier se charge et génère sur Vulkan | génération 11,9 → 26,8 t/s, prompt 16,5 → 91 t/s |
 | G7 | Un modèle plus gros que la VRAM déversait en RAM système tout ce qu'il téléversait en dernier, tête de sortie et poids denses compris, relus à chaque token par le bus | `7598ca2` | profil par timestamps GPU : tête 16,4 → 1,45 ms par token, couches 29-40 à 2,5 ms contre 0,66 ms pour les précédentes ; même sortie au token près ; 34 tests `kinetic-vulkan` verts | génération 25,7 → 33,5 t/s, préfill 92,6 → 92,9 t/s |
-| G8 | Aucune découpe GPU/CPU sur Vulkan : `--gpu-layers` y était accepté et ignoré, et un modèle plus gros que la VRAM relisait ses couches par le PCIe | `2c6c03b` | `kinetic bench --gpu-layers 31` : 9 des 40 couches sur le CPU, sortie cohérente, 34 tests `kinetic-vulkan` verts, défaut inchangé au token près | découpe mesurée plus lente que le placement en place : tg128 16,8 contre 30,8 t/s, pp512 167 contre 205 ; elle reste optionnelle |
+| G8 | Aucune découpe GPU/CPU sur Vulkan : `--gpu-layers` y était accepté et ignoré, et un modèle plus gros que la VRAM relisait ses couches par le PCIe | `2c6c03b` | `kinetic bench --gpu-layers 31` : 9 des 40 couches sur le CPU, 34 tests `kinetic-vulkan` verts, défaut inchangé au token près, et `tests/vulkan.rs` sur un quart de couches à l'hôte | découpe mesurée plus lente que le placement en place : tg128 16,8 contre 30,8 t/s, pp512 167 contre 205 ; elle reste optionnelle |
 | G4 | Prétokenizer `tekken` absent : `helcyon-gpt-4o-v4.5` refusé au chargement | non committé | mêmes ids que `llama-tokenize` sur 26 lignes de contrôle et sur un fichier entier (83 tokens, identiques), 22 nov. ; 28 tests tokenizer verts ; génération Vulkan 77,3 t/s | le modèle se charge et génère |
 
 G1 et G2 ferment une partie de **§4.3 formats** et amorcent **P0.2** ; G3 ferme la
@@ -307,9 +307,44 @@ les couches hôte n'ayant pas de noyau many-token côté CPU.
 
 Conséquence : la découpe est livrée mais **optionnelle**, le défaut reste le
 placement de G7 — les 40 couches sur le périphérique, les experts prenant le
-débordement —, au même débit et au token près. Sous `--gpu-layers`, la sortie
-diverge de celle du défaut, comme entre les chemins CPU et Vulkan : les couches
-hôte calculent en f32 sur le CPU, le périphérique non.
+débordement —, au même débit et au token près.
+
+Sous `--gpu-layers`, la sortie ne reste pas au token près. Mesuré en glouton
+(`-n 60 --temp 0 -p "Count from 1 to 20, one number per line:"`), défaut contre
+découpe :
+
+| Modèle | Couches sur l'hôte | Sortie |
+|---|---:|---|
+| qwen3-coder-30b-a3b (IQ3_XXS, MoE) | 4 sur 48 | identique, 24 tokens |
+| qwen3-coder-30b-a3b | 24 sur 48 | identique, 24 tokens |
+| qwen3.8-35b-a3b (Q4_K_M) | 1 sur 40 | identique jusqu'à « 20 », puis 22 au lieu de 1 |
+| qwen3.8-35b-a3b | 9 sur 40 | diverge sur le 19e token |
+
+La cause est celle de la divergence CPU↔Vulkan : une couche hôte calcule en
+f32 sur le CPU, une couche sur le périphérique dans les noyaux quantifiés, et
+sur un modèle Q4_K_M les écarts de logits suffisent à changer un token glouton
+au bout d'une vingtaine. Sur IQ3_XXS, ils ne le font pas en 24 tokens.
+
+### Couverture de la découpe (22 nov. 2026)
+
+`crates/kinetic-models/tests/vulkan.rs`, sur un vrai modèle, un quart des
+couches sur l'hôte (`KINETIC_TEST_GGUF=model.gguf cargo test --release -p
+kinetic-models --features vulkan --test vulkan -- --ignored`) :
+
+- un lot de tokens donne les mêmes logits, bit pour bit, que les mêmes tokens
+  un par un, cache chaud compris ;
+- un brouillon vérifié dans un point de contrôle, dont on garde deux tokens,
+  puis un brouillon entièrement rejeté, donnent l'état du décodage simple ;
+- `rollback` et `reset` laissent l'état comme s'il n'avait jamais tourné,
+  couches hôte comprises ;
+- une copie hôte (`host_state`) restaurée donne la suite du décodage, et la
+  restauration dans un état qui a déjà tourné, la voie du cache chaud, aussi ;
+- les tokens gloutons sont bien les plus grands logits, et le chemin CPU prédit
+  les mêmes tokens sur huit pas.
+
+Trois mutations volontaires ont été essayées pour vérifier que le test mord :
+omettre la copie des couches hôte dans `load_state`, leur `rollback` et leur
+rafraîchissement dans `reset` font échouer le test, chacun sur son assertion.
 
 ### Mesures de G5 (22 nov. 2026)
 

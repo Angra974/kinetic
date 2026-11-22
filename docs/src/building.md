@@ -98,7 +98,8 @@ KINETIC_TEST_GGUF=SmolLM2-135M-Instruct-f16.gguf \
 
 The CUDA kernel tests run when a GPU and the kernels are present and print
 `skipped: ...` otherwise; the model tests on the GPU take `--features cuda`
-on `kinetic-models`. Test in release mode: real models in a debug build are
+on `kinetic-models`, and those on Vulkan `--features vulkan` (`--test cuda`
+and `--test vulkan`). Test in release mode: real models in a debug build are
 very slow.
 
 ## Checks before a pull request

@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ids = tokenizer.encode(&prompt, true);
     let physical = devices()?.into_iter().nth(index).ok_or("no such device")?;
     // Room for the wrong tokens of the last draft.
-    let gpu = VulkanModel::load_on(&model, ids.len() + n + 3, &physical)?;
+    let gpu = VulkanModel::load_on_device(&model, ids.len() + n + 3, &physical, None)?;
     println!("device: {}", gpu.device_name());
 
     let mut cpu_state = model.new_state();

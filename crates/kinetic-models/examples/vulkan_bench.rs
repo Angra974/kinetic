@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = GgufFile::open(&path)?;
     let model = kinetic_models::load(&file)?;
     let physical = devices()?.into_iter().nth(index).ok_or("no such device")?;
-    let gpu = VulkanModel::load_on(&model, PROMPT + DECODE + 1, &physical)?;
+    let gpu = VulkanModel::load_on_device(&model, PROMPT + DECODE + 1, &physical, None)?;
     let vocab = gpu.n_vocab() as u64;
     let tokens: Vec<u32> = (0..PROMPT as u64)
         .map(|i| (i.wrapping_mul(2_654_435_761) % vocab) as u32)

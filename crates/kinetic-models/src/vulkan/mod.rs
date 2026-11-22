@@ -204,14 +204,10 @@ fn upload_layers<'a>(
 ) -> Result<(usize, Vec<VulkanLayer>), LoadError> {
     let n = model.layers.len();
     let want = gpu_layers.unwrap_or(n).min(n);
-    match want {
-        0 => {
-            return Err(LoadError(
-                "no layer on the device: --gpu-layers 0 runs on the CPU (--device cpu)".into(),
-            ))
-        }
-        // The layers after the split run on the device.
-        _ => {}
+    if want == 0 {
+        return Err(LoadError(
+            "no layer on the device: --gpu-layers 0 runs on the CPU (--device cpu)".into(),
+        ));
     }
     let kept = model.layers[n - want..]
         .iter()
