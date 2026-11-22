@@ -18,8 +18,10 @@
 | CUDA | absent (aucun GPU NVIDIA) |
 | llama.cpp mesuré | `build-vulkan/bin/llama-bench` (Vulkan0) |
 
-Dépôt de travail : `/home/mrnemesys/Devs/kinetic-work`, branche `main`, origin bare
-local. Le dépôt `kinetic` (`f3723b1`) ne contient pas ces noyaux.
+Dépôt de travail : le fork `Angra974/kinetic`, remote `fork`. `main` porte ce journal et
+l'analyse `llama-kinetic.md` ; la branche `vulkan-work` porte les noyaux et les mesures
+(commits `0127427` et `85d29aa`). `upstream` (`Veloresearch/kinetic`) n'est que l'amont :
+on y lit les nouveautés, on n'y pousse pas. Les deux branches partent de `f3723b1`.
 
 ## 2. Protocole
 
@@ -99,8 +101,8 @@ local. Le dépôt `kinetic` (`f3723b1`) ne contient pas ces noyaux.
 | E1 noyaux IQ | `0127427` | 154,8 | 152,3 | 38,1 | 1159,5 | 40,3 |
 | E2 many-token | `85d29aa` | 261,9 | 257,9 | 38,4 | 1154,2 | 40,1 |
 
-Artefacts : `bench-results.csv` (E1) et `bench-many.csv` (E2) dans
-`kinetic-work`, non suivis par git.
+Artefacts : `bench-results.csv` (E1) et `bench-many.csv` (E2) sont restés dans l'ancien
+répertoire de travail `/home/mrnemesys/Devs/kinetic-work`, non suivis par git.
 
 ---
 

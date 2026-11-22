@@ -2,8 +2,10 @@
 
 > **Statut** : analyse. Aucun code de Kinetic n'a été modifié ; les mesures citées au
 > §4.13, §5.6, §7.3 et §8 viennent de la branche de travail et sont reproductibles.
-> **Snapshot** : Kinetic `f3723b1` (19 nov. 2026) et sa branche de travail `kinetic-work`
-> (commits `0127427` et `85d29aa`, 22 nov. 2026), llama.cpp `19bc41dbb` (21 nov. 2026).
+> **Snapshot** : Kinetic `f3723b1` (19 nov. 2026) et la branche `vulkan-work` du fork
+> `Angra974/kinetic` (commits `0127427` et `85d29aa`, 22 nov. 2026), llama.cpp `19bc41dbb`
+> (21 nov. 2026). Le dépôt de travail est ce fork : `main` porte ce document et `PLAN.md`,
+> `vulkan-work` porte les noyaux.
 > Les tableaux de types, de modèles et de performance portent leur commit de relevé.
 > **But** : déterminer ce qui manque à Kinetic pour couvrir 100 % des capacités de
 > llama.cpp, en conservant l'architecture de Kinetic, puis proposer les modules
@@ -192,7 +194,7 @@ gain mesurable et reproductible, pas une victoire anecdotique.
 | `llama.cpp/tools/` et `examples/` | outils et workflows |
 | `lspci`, `rocminfo`, `vulkaninfo`, `hipcc --version` | matériel local, ROCm 7.2, Vulkan 1.4 RADV, gfx1201 |
 | `llama.cpp/build-hip`, `build-vulkan` | backends réellement disponibles sur la machine |
-| `kinetic-work`, commits `0127427` et `85d29aa` | noyaux Vulkan IQ3_XXS/IQ4_XS/Q4_0 (mono-token et many-token) et mesures du 22 nov. |
+| Branche `vulkan-work` du fork, commits `0127427` et `85d29aa` | noyaux Vulkan IQ3_XXS/IQ4_XS/Q4_0 (mono-token et many-token) et mesures du 22 nov. |
 
 ### 2.2 Conventions de comptage
 
@@ -355,7 +357,7 @@ modèles non-BPE (UGM, RWKV, PLaMo) demandent des modules dédiés dans
 | **F8_E4M3** | **non** | **non** | **non** | **non** | oui | type 43 à ajouter |
 | Q1_0, Q2_0, PQ2_0, PTQ1_0 | oui (source) | **non** | **non** | oui (source) | Q1_0/Q2_0 | docs à mettre à jour |
 
-**Conséquence locale (relevé du 22 nov., `kinetic-work` `85d29aa`)** : Kinetic Vulkan
+**Conséquence locale (relevé du 22 nov., `vulkan-work` `85d29aa`)** : Kinetic Vulkan
 charge F32, F16, Q8_0, Q4_0, Q4_K, Q5_K, Q6_K, IQ3_XXS et IQ4_XS, chacun avec un
 noyau mono-token et un noyau many-token. Les modèles locaux en IQ4_XS (L3-8B Stheno)
 et IQ3_XXS (Qwen3.8-27B) tournent donc sur GPU. Les blocages de format restants sont
@@ -861,7 +863,7 @@ changer l'architecture du backend.
 
 ### 5.6 `kinetic-vulkan` (priorité locale)
 
-État actuel (`kinetic-work` `85d29aa`) : noyaux GEMV pour F32, F16, Q8_0, Q4_0, Q4_K,
+État actuel (`vulkan-work` `85d29aa`) : noyaux GEMV pour F32, F16, Q8_0, Q4_0, Q4_K,
 Q5_K, Q6_K, IQ3_XXS et IQ4_XS, avec un second noyau par type pour les passes de
 `PROMPT_BATCH = 128` tokens (`shaders/gemv_many.wgsl`) ; attention
 `attend_64/128/256/512` déjà écrite en flash-style (online softmax, `shaders/attend.wgsl`
@@ -1201,7 +1203,7 @@ avant de les activer.
 | Validation RADV | Vérifier chaque chemin sur gfx1201 ; le driver impose ses limites (sous-groupe, BF16/FP4) | stabilité |
 
 Le point le plus rentable est le **GEMM de prompt**. Mesure du 22 nov. sur
-`Qwen3.8-27B-IQ3_XXS` (`kinetic-work` `85d29aa` contre `llama.cpp` Vulkan0) :
+`Qwen3.8-27B-IQ3_XXS` (`vulkan-work` `85d29aa` contre `llama.cpp` Vulkan0) :
 
 | | kinetic Vulkan | llama.cpp Vulkan | écart |
 |---|---:|---:|---:|
