@@ -103,6 +103,7 @@ def main():
 
     if a.base_url:
         base = a.base_url.rstrip("/")
+        proc = None
     else:
         args = [a.kinetic, "serve", a.model, "--port", str(a.port),
                 "--device", a.device, "--parallel", str(a.parallel),
@@ -110,23 +111,25 @@ def main():
         proc = subprocess.Popen(args, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         base = f"http://127.0.0.1:{a.port}"
-        wait_ready(base + "/health", proc)
-
-    rng = random.Random()
-    failed = False
-    for position, label in ((0.5, "50 %"), (0.99, "100 %")):
-        code = "NEEDLE-" + "".join(rng.choice(string.ascii_uppercase)
-                                   for _ in range(6))
-        prompt = needle_case(code, position, a.context)
-        text, usage = probe(base, prompt, a.context)
-        ok = code in text
-        est = usage.get("prompt_tokens", "?")
-        print(f"needle {label}: prompt_tokens={est} -> {text!r} "
-              f"({'PASS' if ok else 'FAIL'})")
-        failed |= not ok
-    if not a.base_url:
-        proc.kill()
-        proc.wait()
+    try:
+        if not a.base_url:
+            wait_ready(base + "/health", proc)
+        rng = random.Random()
+        failed = False
+        for position, label in ((0.5, "50 %"), (0.99, "100 %")):
+            code = "NEEDLE-" + "".join(rng.choice(string.ascii_uppercase)
+                                       for _ in range(6))
+            prompt = needle_case(code, position, a.context)
+            text, usage = probe(base, prompt, a.context)
+            ok = code in text
+            est = usage.get("prompt_tokens", "?")
+            print(f"needle {label}: prompt_tokens={est} -> {text!r} "
+                  f"({'PASS' if ok else 'FAIL'})")
+            failed |= not ok
+    finally:
+        if proc:
+            proc.kill()
+            proc.wait()
     sys.exit(1 if failed else 0)
 
 

@@ -498,25 +498,50 @@ CI), `scripts/needle_test.py`, `scripts/soak_watchdog.py`,
 `.github/workflows/gpu.yml` (runner auto-hébergé, gate 5 %), `conformance.py`
 accepte `--device vulkan`.
 
+### Compléments de fin de campagne (22 nov. 2026, même jour)
+
+- **Bande passante mesurée directement** : l'exemple `bandwidth` de
+  `kinetic-vulkan` donne 638,8 Go/s de lecture atteignable (99,8 % du nominal),
+  ~630 Go/s soutenus sur des tensors hors cache. `THEORY.md` relit la baseline
+  contre cet étalon : le décodage dense est à 75–80 % de la bande, le MoE à
+  12–40 %, le préfill à 3–14 TFLOPS effectifs contre 64 chez llama.
+- **Essai A/B de bout en bout** (35B, candidat `--gpu-layers 31`) : contrôles
+  30,7 / 31,6 t/s (écart 2,9 %), candidat rejeté à 18,2 t/s avec −31 % de
+  préfill — conforme à G8, verdict au ledger. Première passe inconclusive à
+  cause d'un serveur `kinetic serve` leaké par la première version de
+  `needle_test.py` (dérive de contrôles 10,7 %, porte de bruit mordue) ; la
+  fuite est corrigée (`try/finally`).
+- **Contexte long** : needle PASS à 50 % et ~98 % à 8k **et** 32k (4B).
+- **Multi-requêtes** : soak 16 slots × 512 tokens × 2 tours à **282 t/s
+  agrégés** (contre 180 à 4 slots), watchdog sans déclenchement, VRAM 4 270 Mio.
+- **pp2048** : 259 / 1162 (27B), 445 / 3935 (30B), 242 / 786 (35B, `-ngl 31`) —
+  l'écart de préfill ne se referme pas sur un prompt plus long.
+
+Reste ouvert pour clore M01 : un GEMM synthétique direct dans la sonde, le
+relevé `top_k`/`n_experts` par modèle, le runner auto-hébergé branché côté
+GitHub, et les quatre modèles non supportés (qwen3vl, PaddleOCR-VL,
+Unlimited-OCR, Offrail Vulkan).
+
 ### État M01 après la première campagne (22 nov. 2026)
 
 | Livrable | État |
 |---|---|
-| `THEORY.md` | écrit — étalon bande passante ~500 Go/s dérivé du décodage dense llama, efficacité préfill mesurée, plafonds par pivot ; sonde D2D directe encore à faire |
-| `ledger.jsonl` | 24 entrées (16 baseline Vulkan kinetic+llama, 4 baseline CPU, conformance, needle, soak) |
+| `THEORY.md` | écrit — bande passante **mesurée directement** (638,8 Go/s, sonde `bandwidth`), plafonds par pivot relus contre cette mesure ; GEMM synthétique direct encore à faire |
+| `ledger.jsonl` | 34 entrées (baseline Vulkan kinetic+llama, 4 baselines CPU, conformance, needle 8k+32k, soak 4 et 16 slots, A/B rejeté, pp2048, sonde matérielle) |
 | `configs/` | une config kinetic + llama par modèle balayé, README du schéma |
 | `best-config.json` | 8 modèles enregistrés, lu par `scripts/regression_gate.py` |
-| `scripts/ab_protocol.py` | écrit — contrôle → candidat → contrôle, portes 3 %/bruit 5 %, verdict au ledger (pas encore d'essai candidat) |
+| `scripts/ab_protocol.py` | **validé de bout en bout** — 35B `--gpu-layers 31` rejeté proprement (contrôles stables 30,7 / 31,6 t/s, verdict + raisons au ledger) ; une première passe inconclusive par serveur leaké a prouvé la porte de bruit |
 | `conformance.py --device vulkan` | fait — 256/256 tokens d'accord sur le 4B |
-| needle 50/100 % | fait — PASS aux deux placements (8003/8192 tokens) |
-| soak + watchdog | fait — 4 slots × 512 tokens × 3 tours, 180 t/s agrégés, watchdog armé sans déclenchement |
-| CI GPU | `.github/workflows/gpu.yml` écrit, activation par runner auto-hébergé étiqueté `gpu` + variable `GPU_BASELINE_MODEL` |
-| Baseline dense 27B / MoE 30B | consignée ci-dessus et dans `docs/src/benchmarks.md` |
+| needle 50/100 % | fait — PASS à 8k **et** 32k de contexte |
+| soak + watchdog | fait — 4 puis 16 slots × 512 tokens, 180 puis 282 t/s agrégés, sans déclenchement |
+| CI GPU | workflow + gate prêts ; branchement du runner auto-hébergé à faire côté GitHub |
+| Baseline dense 27B / MoE 30B | consignée ci-dessus et dans `docs/src/benchmarks.md`, avec pp2048 |
+| Rapport de baseline dans `PLAN.md` | fait |
 
-Reste ouvert pour clore M01 : un essai A/B complet de bout en bout avec un vrai
-candidat, la sonde D2D/GEMM de `THEORY.md`, le runner auto-hébergé branché, le
-balayage multi-requêtes (1/4/16/64) et contexte long (8k/32k), et les quatre
-modèles non supportés (qwen3vl, PaddleOCR-VL, Unlimited-OCR, Offrail Vulkan).
+Reste ouvert pour clore M01 : le GEMM synthétique direct dans la sonde, le
+relevé `top_k`/`n_experts` par modèle, le branchement du runner auto-hébergé
+côté GitHub, et les quatre modèles non supportés (qwen3vl, PaddleOCR-VL,
+Unlimited-OCR, Offrail Vulkan).
 
 ## 6. Ce qui n'est pas dans ce journal
 

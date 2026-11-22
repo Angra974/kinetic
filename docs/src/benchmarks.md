@@ -104,12 +104,14 @@ these numbers against the hardware ceiling. Kinetic runs `kinetic bench
 | Qwen3-Coder-30B-A3B IQ3_XXS | 3522 | 484 | **201,5** | 55,4 |
 | Qwen3.8-35B-A3B Q4_K_M | 751 | 251 | **51,6** | 31,2 |
 
-`edit_identical` was true for all eight. Dense decode sits at the memory
-bandwidth wall already (93–94 % of the measured 500 GB/s reference); the gap
-against llama.cpp is prompt processing (4–7×) and MoE decode (3–7×), which is
-the P0.2 many-token kernel work, not a hardware limit. Four local models do
-not run yet: `qwen3vl`, PaddleOCR-VL, Unlimited-OCR (architectures not
-supported) and Offrail-27B (folded weights not supported on Vulkan).
+`edit_identical` was true for all eight. Dense decode reaches 75–80 % of the
+directly measured 638.8 GB/s read bandwidth (probe: `cargo run --release -p
+kinetic-vulkan --example bandwidth`); the gap against llama.cpp is prompt
+processing (4–7×) and MoE decode (3–7×), which is the P0.2 many-token kernel
+work, not a hardware limit. Four local models do not run yet: `qwen3vl`,
+PaddleOCR-VL, Unlimited-OCR (architectures not supported) and Offrail-27B
+(folded weights not supported on Vulkan). At 2048-token prompts the same
+picture holds: 259 vs 1162 (27B), 445 vs 3935 (30B), 242 vs 786 (35B).
 
 ## Share your numbers
 
