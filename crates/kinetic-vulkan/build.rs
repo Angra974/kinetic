@@ -32,6 +32,17 @@ const KERNELS: &[(&str, &str, &[&str])] = &[
     ("gemv_iq3_xxs", "", &["gemv", "gemv_iq3_xxs"]),
     ("gemv_iq4_xs", "", &["gemv", "gemv_iq4_xs"]),
     ("gemv_q4_0", "", &["gemv", "gemv_q4_0"]),
+    (
+        "gemv_iq3_xxs_many",
+        "",
+        &["gemv_many", "gemv_iq3_xxs_many"],
+    ),
+    (
+        "gemv_iq4_xs_many",
+        "",
+        &["gemv_many", "gemv_iq4_xs_many"],
+    ),
+    ("gemv_q4_0_many", "", &["gemv_many", "gemv_q4_0_many"]),
     ("quantize_q8", "", &["quantize_q8"]),
     ("read_sum", "", &["read_sum"]),
     ("norm", "", &["norm", "put_q8"]),

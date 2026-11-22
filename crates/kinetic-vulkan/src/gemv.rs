@@ -376,6 +376,9 @@ impl Kernels {
                 TensorType::Q4K => return (&self.gemv_q4_k_many, MANY_ROWS_PER_GROUP),
                 TensorType::Q5K => return (&self.gemv_q5_k_many, MANY_ROWS_PER_GROUP),
                 TensorType::Q6K => return (&self.gemv_q6_k_many, MANY_ROWS_PER_GROUP),
+                TensorType::IQ3XXS => return (&self.gemv_iq3_xxs_many, MANY_ROWS_PER_GROUP),
+                TensorType::IQ4XS => return (&self.gemv_iq4_xs_many, MANY_ROWS_PER_GROUP),
+                TensorType::Q4_0 => return (&self.gemv_q4_0_many, MANY_ROWS_PER_GROUP),
                 _ => {}
             }
         }
