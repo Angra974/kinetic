@@ -710,7 +710,9 @@ performance (protocole §7.10, un fichier, un backend par comparaison) :
 | pp512 | 261,9 t/s | 1154,2 t/s |
 | pp2048 | 257,9 t/s | 1149,0 t/s |
 | tg128 | 38,4 t/s | 40,1 t/s |
-| avant les noyaux IQ (CPU) | 3,8 / 0,6 t/s | — |
+
+Avant les noyaux IQ, ce modèle ne tournait que sur le CPU, à 3,8 t/s en pp512 et
+0,6 t/s en tg128 : le passage au GPU vaut ×69 en préfill et ×60 en décodage.
 
 Lecture : le décodage est à 95 % de llama.cpp, le préfill à 23 %. Le levier local n'est
 donc plus le format ni le backend, mais le GEMM de prompt (§7.3). Les blocages qui
