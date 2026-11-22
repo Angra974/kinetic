@@ -108,9 +108,7 @@ fn tekken_splits_at_case_changes_and_keeps_one_digit_a_piece() {
     assert_eq!(
         pieces(pretokenize::TEKKEN, "camelCase HTTPServer 2024"),
         // a lower-to-upper change splits; upper-to-lower does not
-        [
-            "camel", "Case", " HTTPServer", " ", "2", "0", "2", "4"
-        ]
+        ["camel", "Case", " HTTPServer", " ", "2", "0", "2", "4"]
     );
     // one run of letters keeps together; symbols and a leading space go
     // with the piece they start, never with the word after them

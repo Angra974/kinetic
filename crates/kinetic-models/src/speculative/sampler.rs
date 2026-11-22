@@ -320,13 +320,9 @@ impl Sampler {
             c.truncate(keep.max(1).max(p.min_keep));
         }
         let rng = &mut self.rng;
-        filters::xtc(
-            c,
-            p.xtc_probability,
-            p.xtc_threshold,
-            p.min_keep,
-            || rng.next_f32(),
-        );
+        filters::xtc(c, p.xtc_probability, p.xtc_threshold, p.min_keep, || {
+            rng.next_f32()
+        });
 
         for (id, prob) in c.iter_mut() {
             *prob = logits[*id as usize];
@@ -353,7 +349,10 @@ impl Sampler {
             &mut self.originals,
             &mut self.candidates,
         );
-        let state = self.adaptive.as_mut().expect("aim without an adaptive state");
+        let state = self
+            .adaptive
+            .as_mut()
+            .expect("aim without an adaptive state");
         let recent = state.weighted_sum / state.total_weight;
         let aimed = (2.0 * target - recent).clamp(0.0, 1.0);
         originals.clear();
@@ -741,7 +740,10 @@ mod tests {
         );
         // plain sampling takes the head about 87% of the time; aiming at
         // 0.5 prefers the tokens nearest that probability instead
-        assert!(aimed[0] < plain[0] * 3 / 4, "plain {plain:?} aimed {aimed:?}");
+        assert!(
+            aimed[0] < plain[0] * 3 / 4,
+            "plain {plain:?} aimed {aimed:?}"
+        );
         assert!(aimed[1] > plain[1] * 2, "plain {plain:?} aimed {aimed:?}");
         assert_eq!(aimed.iter().sum::<usize>(), 1000);
     }

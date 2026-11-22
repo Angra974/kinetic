@@ -27,7 +27,10 @@ fn build<'a>(l: &Loader<'a>, b: &Basics) -> Result<Stack<'a>, LoadError> {
     // Full-attention layers keep a single key-value head per group, so the
     // count is either one number or one per layer.
     let n_head_kv = per_layer(l, "attention.head_count_kv", n_layer)?;
-    if n_head_kv.iter().any(|&kv| kv == 0 || !n_head.is_multiple_of(kv)) {
+    if n_head_kv
+        .iter()
+        .any(|&kv| kv == 0 || !n_head.is_multiple_of(kv))
+    {
         return Err(LoadError("heads do not split into groups".into()));
     }
     let n_ff = per_layer(l, "feed_forward_length", n_layer)?;

@@ -167,7 +167,7 @@ fn check(ty: TensorType, sigmoid: bool, mix: SharedMix) {
         let y = DeviceBuffer::from_slice(dev, &shared).unwrap();
         let gu = DeviceBuffer::new(dev, tokens * k * 2 * rows).unwrap();
         let out = DeviceBuffer::new(dev, tokens * k * cols).unwrap();
-        let mut act = GemvInput::batch(dev, rows, tokens * k).unwrap();
+        let act = GemvInput::batch(dev, rows, tokens * k).unwrap();
         let mut input = GemvInput::batch(dev, cols, tokens).unwrap();
         let route = Route::new(dev, tokens * k).unwrap();
         let mut batch = Batch::new(dev, tokens, 0, 16, 0).unwrap();
@@ -246,7 +246,7 @@ fn check(ty: TensorType, sigmoid: bool, mix: SharedMix) {
 
         // The host: the router's picks, then each picked expert, on the
         // input and activations the device quantized.
-        let xe = quantized(&input);
+        let _xe = quantized(&input);
         let act_q = act.quantized().to_vec().unwrap();
         let act_d = act.block_scales().to_vec().unwrap();
         let act_x: Vec<f32> = act_q

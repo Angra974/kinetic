@@ -51,8 +51,8 @@ mod ffn;
 mod gemv;
 mod info;
 mod kernels;
-mod moe;
 mod layout;
+mod moe;
 mod norm;
 mod short_conv;
 

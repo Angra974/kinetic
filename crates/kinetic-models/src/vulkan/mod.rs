@@ -19,9 +19,9 @@
 mod attention;
 mod delta_net;
 mod ffn;
-mod moe;
 mod host;
 mod layer;
+mod moe;
 mod mtp;
 mod rope;
 mod short_conv;

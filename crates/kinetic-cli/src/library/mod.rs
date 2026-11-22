@@ -98,10 +98,7 @@ fn from_groups(groups: Vec<folder::Group>, store: Store) -> Vec<Local> {
                 let h = Header::read(&f);
                 (f, h)
             })
-            .partition(|(_, h)| {
-                h.as_ref()
-                    .is_ok_and(|h| h.is_projector() || h.is_adapter())
-            });
+            .partition(|(_, h)| h.as_ref().is_ok_and(|h| h.is_projector() || h.is_adapter()));
         let projectors: Vec<_> = extras
             .into_iter()
             .filter(|(_, h)| h.as_ref().is_ok_and(Header::is_projector))

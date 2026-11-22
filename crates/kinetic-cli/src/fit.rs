@@ -128,9 +128,7 @@ impl Speeds {
 /// VRAM or not at all.
 fn best_gpu(gpus: &[Gpu]) -> Option<&Gpu> {
     gpus.iter()
-        .filter(|g| {
-            g.problem.is_none() && g.discrete && matches!(g.api, "CUDA" | VULKAN)
-        })
+        .filter(|g| g.problem.is_none() && g.discrete && matches!(g.api, "CUDA" | VULKAN))
         .max_by_key(|g| (g.api == "CUDA", g.memory_free.unwrap_or(g.memory_total)))
 }
 

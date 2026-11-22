@@ -574,7 +574,6 @@ impl<'a> Engine<'a> {
             false => self.stop_tokens.clone(),
         };
 
-
         let mut decoder = self.tokenizer.stream();
         let mut stops = StopStrings::new(&request.stop);
         let mut think = prompt.thinking.map(|open| match prompt.tools.is_empty() {

@@ -281,7 +281,10 @@ impl Common {
         if let Some(b) = &self.dry_sequence_breakers {
             s.dry_sequence_breakers = b.clone();
         }
-        set(&mut s.dynatemp_range, self.dynatemp_range.map(|r| r.max(0.0)));
+        set(
+            &mut s.dynatemp_range,
+            self.dynatemp_range.map(|r| r.max(0.0)),
+        );
         set(&mut s.dynatemp_exponent, self.dynatemp_exponent);
         if let Some(n) = self.min_keep {
             s.min_keep = usize::try_from(n).unwrap_or(0);
@@ -625,7 +628,14 @@ mod tests {
             "messages": [{"role": "user", "content": "Hi"}],
             "reasoning_budget": -1,
         }));
-        assert_eq!(off.common.request(&Sampling::default()).unwrap().sampling.reasoning_budget, None);
+        assert_eq!(
+            off.common
+                .request(&Sampling::default())
+                .unwrap()
+                .sampling
+                .reasoning_budget,
+            None
+        );
     }
 
     #[test]

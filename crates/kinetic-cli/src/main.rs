@@ -167,7 +167,12 @@ enum Command {
         )]
         depth: usize,
         /// Tokens in the prompt test
-        #[arg(long, value_name = "N", default_value_t = 512, conflicts_with = "compare")]
+        #[arg(
+            long,
+            value_name = "N",
+            default_value_t = 512,
+            conflicts_with = "compare"
+        )]
         prompt: usize,
         #[command(flatten)]
         off: OffArg,

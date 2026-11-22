@@ -222,10 +222,9 @@ impl Device {
         self.host_bytes.set(self.host_bytes.get() + bytes);
     }
 
-
-
     pub(crate) fn sub_host_bytes(&self, bytes: u64) {
-        self.host_bytes.set(self.host_bytes.get().saturating_sub(bytes));
+        self.host_bytes
+            .set(self.host_bytes.get().saturating_sub(bytes));
     }
 
     /// Whether memory type `ty` lives in the device's own memory, its VRAM,

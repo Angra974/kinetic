@@ -79,6 +79,7 @@ struct Speeds {
 /// need repeated, typed or concurrent requests, which the tests never send.
 const MEASURED: [Tech; 3] = [Tech::Rad1, Tech::Shortlist, Tech::Torque];
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     path: &Path,
     name: &str,

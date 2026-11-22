@@ -45,9 +45,7 @@ impl DeviceExperts {
             return Err(Error::Unsupported(ty));
         }
         if count == 0 || !cols.is_multiple_of(Q8_BLOCK) {
-            return Err(Error::Shape(format!(
-                "{count} experts of {rows}x{cols}"
-            )));
+            return Err(Error::Shape(format!("{count} experts of {rows}x{cols}")));
         }
         Ok(DeviceExperts {
             ty,
@@ -86,7 +84,7 @@ impl DeviceExperts {
         };
         let m = Matrix::new(ty, &first[..bytes.min(first.len())], rows, cols);
         // Kernels read whole 16-byte words, also of the last plane.
-        device_layout(&m).len().next_multiple_of(16) / 16
+        device_layout(&m).len().div_ceil(16)
     }
 
     /// Copies expert `e` of `data`, whose experts follow one another, into
@@ -344,6 +342,7 @@ impl Kernels {
     /// `t` of `y` is the weighted sum of its `k` rows of `out`, which holds
     /// one row of `d` values per slot, plus the shared expert's output `y`
     /// already holds when `mix` asks for it, scaled by `gate` when gated.
+    #[allow(clippy::too_many_arguments)]
     pub fn moe_combine(
         &self,
         route: &Route,
