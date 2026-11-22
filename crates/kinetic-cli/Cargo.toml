@@ -11,7 +11,7 @@ name = "kinetic"
 path = "src/main.rs"
 
 [features]
-default = ["cuda", "vulkan"]
+default = ["vulkan"]
 # Runs models on NVIDIA GPUs; the kernels are built when nvcc is found. The
 # driver itself is opened at runtime, so the binary still starts, on the
 # CPU, on machines without one.

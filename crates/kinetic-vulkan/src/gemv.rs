@@ -18,10 +18,12 @@ const ROWS_PER_GROUP: usize = 4;
 /// subgroups of 32, each taking a tile of four rows.
 #[cfg(metal_driver)]
 const ROWS_PER_GROUP: usize = 16;
-/// Rows per workgroup of the kernels for many tokens in `shaders/metal`:
-/// four subgroups of two rows.
+/// Rows per workgroup of the kernels for many tokens: four subgroups of two
+/// rows in `shaders/metal`, one row each in `shaders/gemv_many.wgsl`.
 #[cfg(metal_driver)]
 const MANY_ROWS_PER_GROUP: usize = 8;
+#[cfg(not(metal_driver))]
+const MANY_ROWS_PER_GROUP: usize = 4;
 /// Elements per scale in the int8 copy of the input.
 const Q8_BLOCK: usize = 32;
 /// Invocations per workgroup of quantize_q8.wgsl, one per block of 32.
@@ -36,6 +38,12 @@ fn block_len(ty: TensorType) -> Option<usize> {
         TensorType::Q4K | TensorType::Q5K | TensorType::Q6K => 256,
         _ => return None,
     })
+}
+
+/// Whether a GEMV kernel exists for weight type `ty`; a model with any
+/// other type cannot be uploaded to a Vulkan device.
+pub fn has_gemv_kernel(ty: TensorType) -> bool {
+    block_len(ty).is_some()
 }
 
 /// A weight matrix in device memory, laid out for the GEMV kernels.
@@ -287,10 +295,7 @@ impl Kernels {
             )));
         }
         // A pass of many prompt tokens runs every row of the batch.
-        #[cfg(metal_driver)]
         let many = rows == Rows::Tokens && commands.prompt();
-        #[cfg(not(metal_driver))]
-        let many = false;
         // SAFETY: checked above: `x` holds every row the batch can name and
         // `y` every output row it can ask for.
         unsafe {
@@ -372,7 +377,11 @@ impl Kernels {
             }
         }
         #[cfg(not(metal_driver))]
-        let _ = many;
+        {
+            if many && ty == TensorType::Q4K {
+                return (&self.gemv_q4_k_many, MANY_ROWS_PER_GROUP);
+            }
+        }
         let kernel = match ty {
             TensorType::F32 => &self.gemv_f32,
             TensorType::F16 => &self.gemv_f16,

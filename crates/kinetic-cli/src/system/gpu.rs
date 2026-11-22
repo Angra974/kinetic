@@ -8,6 +8,8 @@ pub struct Gpu {
     pub memory_total: u64,
     /// Free memory, where the API reports it without allocating.
     pub memory_free: Option<u64>,
+    /// Whether its memory is its own VRAM rather than the system's RAM.
+    pub discrete: bool,
     /// Nominal memory bandwidth in bytes per second.
     pub bandwidth: Option<f64>,
     /// Why Kinetic cannot use it and what to do, if it cannot.
@@ -36,6 +38,26 @@ pub fn cuda_free() -> Option<u64> {
     cuda().ok()?.iter().filter_map(|g| g.memory_free).max()
 }
 
+/// Read bandwidth of the Vulkan GPU named `name`, measured by a kernel on
+/// that device: the only bandwidth a Vulkan driver answers with. `None`
+/// when Vulkan is unavailable or the measurement fails.
+#[cfg(feature = "vulkan")]
+pub fn vulkan_bandwidth(name: &str) -> Option<f64> {
+    let physical = kinetic_vulkan::Instance::new()
+        .and_then(|i| i.physical_devices())
+        .ok()?
+        .into_iter()
+        .find(|d| d.info().name == name)?;
+    let device = kinetic_vulkan::Device::new(&physical).ok()?;
+    let kernels = kinetic_vulkan::Kernels::load(&device).ok()?;
+    kernels.read_bandwidth(&device).ok()
+}
+
+#[cfg(not(feature = "vulkan"))]
+pub fn vulkan_bandwidth(_name: &str) -> Option<f64> {
+    None
+}
+
 #[cfg(feature = "cuda")]
 fn cuda() -> Result<Vec<Gpu>, String> {
     use kinetic_cuda::{driver_version, Context, Device};
@@ -55,6 +77,7 @@ fn cuda() -> Result<Vec<Gpu>, String> {
             driver: format!("CUDA {major}.{minor}, compute {cc_major}.{cc_minor}"),
             memory_total: info.total_memory as u64,
             memory_free: free,
+            discrete: true,
             bandwidth: info.peak_bandwidth(),
             problem: None,
             name: info.name,
@@ -162,7 +185,9 @@ fn vulkan() -> Result<Vec<Gpu>, String> {
                     api => api.to_owned(),
                 },
                 memory_total: info.device_local_bytes,
-                memory_free: None,
+                memory_free: info.device_local_free,
+                // an integrated GPU's "device-local" memory is the system's
+                discrete: info.kind == kinetic_vulkan::DeviceKind::Discrete,
                 bandwidth: None,
                 problem: info.missing().map(|why| match info.subgroups_too_wide() {
                     true => format!("{why}; no driver changes that, so models run on the CPU"),

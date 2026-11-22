@@ -34,8 +34,7 @@ pub struct Kernels {
     pub(crate) gemv_f16: Rc<Kernel>,
     pub(crate) gemv_q8_0: Rc<Kernel>,
     pub(crate) gemv_q4_k: Rc<Kernel>,
-    /// The same sums for a pass of many tokens; see `shaders/metal`.
-    #[cfg(metal_driver)]
+    /// The same sums for a pass of many tokens; see `shaders/gemv_many.wgsl`.
     pub(crate) gemv_q4_k_many: Rc<Kernel>,
     #[cfg(metal_driver)]
     pub(crate) gemv_q5_k_many: Rc<Kernel>,
@@ -70,6 +69,8 @@ impl Kernels {
             gemv_f16: gemv("gemv_f16", spirv!("gemv_f16"))?,
             gemv_q8_0: gemv("gemv_q8_0", spirv!("gemv_q8_0"))?,
             gemv_q4_k: gemv("gemv_q4_k", spirv!("gemv_q4_k"))?,
+            #[cfg(not(metal_driver))]
+            gemv_q4_k_many: gemv("gemv_q4_k_many", spirv!("gemv_q4_k_many"))?,
             #[cfg(metal_driver)]
             gemv_q4_k_many: gemv(
                 "gemv_q4_k_many",
@@ -102,6 +103,33 @@ impl Kernels {
             read_sum: Kernel::new(device, "read_sum", spirv!("read_sum"), 2, 1)?,
             single: DeviceBuffer::from_slice(device, &[1, 0, 0, 1])?,
         })
+    }
+
+    /// Bytes per second the device reads its memory at, measured by
+    /// [`Kernels::read_sum`] on a buffer far larger than any cache.
+    ///
+    /// This is the ceiling for memory-bound kernels, and the only bandwidth
+    /// a Vulkan driver reports: it has no nominal figure to ask for.
+    pub fn read_bandwidth(&self, device: &Rc<Device>) -> Result<f64> {
+        // far larger than any GPU cache, so every read reaches DRAM
+        const BYTES: usize = 512 << 20;
+        const REPS: usize = 10;
+        // the fastest run counts: the others were slowed by whatever else
+        // used the memory meanwhile
+        const TRIALS: usize = 3;
+        let data = DeviceBuffer::<u8>::new(device, BYTES)?;
+        let sum = DeviceBuffer::<u32>::new(device, 1)?;
+        let mut best = f64::INFINITY;
+        for _ in 0..TRIALS {
+            let mut commands = Commands::new(device)?;
+            let start = commands.timestamp()?;
+            for _ in 0..REPS {
+                self.read_sum(&data, &sum, &mut commands)?;
+            }
+            let end = commands.timestamp()?;
+            best = best.min(commands.submit()?.seconds(start, end) / REPS as f64);
+        }
+        Ok(BYTES as f64 / best)
     }
 
     /// Reads all of `data` once and adds its sum as 32-bit words to `out[0]`.

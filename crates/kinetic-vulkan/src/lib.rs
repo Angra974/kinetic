@@ -98,7 +98,7 @@ pub const API: &str = "Metal";
 /// Most tokens worth running as one prompt pass, or 0 for a driver with no
 /// kernels of its own for such passes; see [`Commands::set_prompt`].
 #[cfg(not(metal_driver))]
-pub const PROMPT_BATCH: usize = 0;
+pub const PROMPT_BATCH: usize = 64;
 #[cfg(metal_driver)]
 pub const PROMPT_BATCH: usize = 64;
 
@@ -108,7 +108,7 @@ pub use commands::{Commands, Graph, Timestamp, Timings};
 pub use delta_net::{DeltaShape, DeltaState, DeltaWeights};
 pub use device::Device;
 pub use error::{Error, Result};
-pub use gemv::{DeviceMatrix, GemvInput, Out, Rows};
+pub use gemv::{has_gemv_kernel, DeviceMatrix, GemvInput, Out, Rows};
 pub use info::{DeviceInfo, DeviceKind, Features};
 pub use instance::Instance;
 pub use kernels::Kernels;
