@@ -1,4 +1,4 @@
-use kinetic_vulkan::{Batch, DeviceBuffer, GemvInput, HostBuffer};
+use kinetic_vulkan::{Batch, DeviceBuffer, GemvInput, HostBuffer, Route};
 
 use super::layer::VulkanLayer;
 use super::Gpu;
@@ -24,6 +24,12 @@ pub(super) struct Work {
     pub gu: DeviceBuffer<f32>,
     /// Feed-forward activations, one per width.
     ffn: Vec<GemvInput>,
+    /// The router logits of the mixture layers, one row per token.
+    router: DeviceBuffer<f32>,
+    /// The routed experts' outputs, one row per slot.
+    moe: DeviceBuffer<f32>,
+    /// The router's choices for the pass.
+    route: Route,
     pub logits: DeviceBuffer<f32>,
     pub best: DeviceBuffer<u32>,
     /// The logits of the head's rows, when a run asks for them.
@@ -73,6 +79,7 @@ impl Work {
         let head = batch.head_rows();
         let (mut proj, mut rec, mut n_ff) = (0, 0, 0);
         let (mut mixed, mut ffn) = (Vec::new(), Vec::new());
+        let (mut experts, mut used) = (0, 0);
         for layer in layers {
             let needs = layer.needs();
             proj = proj.max(needs.proj);
@@ -80,12 +87,19 @@ impl Work {
             n_ff = n_ff.max(layer.n_ff());
             add_width(&mut mixed, needs.width);
             add_width(&mut ffn, layer.n_ff());
+            if let Some((n_exp, k)) = layer.moe_shape() {
+                experts = experts.max(n_exp);
+                used = used.max(k);
+            }
         }
+        // A routed layer runs one row per slot: a token's picks.
+        let slots = rows * used.max(1);
+        let wide = if used == 0 { rows } else { slots };
         let f32s = |len: usize| DeviceBuffer::<f32>::new(dev, len.max(1));
         let inputs = |widths: Vec<usize>| {
             widths
                 .into_iter()
-                .map(|w| GemvInput::batch(dev, w, rows))
+                .map(|w| GemvInput::batch(dev, w, wide))
                 .collect::<kinetic_vulkan::Result<Vec<_>>>()
         };
         Ok(Work {
@@ -96,7 +110,10 @@ impl Work {
             proj: f32s(rows * proj)?,
             rec: f32s(rows * rec)?,
             mixed: inputs(mixed)?,
-            gu: f32s(rows * 2 * n_ff)?,
+            gu: f32s(wide * 2 * n_ff)?,
+            router: f32s(rows * experts.max(1))?,
+            moe: f32s(slots * d)?,
+            route: Route::new(dev, slots)?,
             ffn: inputs(ffn)?,
             logits: f32s(head * vocab)?,
             best: DeviceBuffer::new(dev, 2 * head.max(1))?,
@@ -116,6 +133,23 @@ impl Work {
         by_width(&self.ffn, width)
     }
 
+    /// Gate and up projections side by side, one row per slot.
+    pub fn gu(&self) -> &DeviceBuffer<f32> {
+        &self.gu
+    }
+
+    pub fn moe_logits(&self) -> &DeviceBuffer<f32> {
+        &self.router
+    }
+
+    pub fn moe_out(&self) -> &DeviceBuffer<f32> {
+        &self.moe
+    }
+
+    pub fn route(&self) -> &Route {
+        &self.route
+    }
+
     /// Device bytes held.
     pub fn size_bytes(&self) -> usize {
         let inputs: usize = self
@@ -125,7 +159,13 @@ impl Work {
             .chain([&self.h])
             .map(|i| i.len() * 21 / 4)
             .sum();
-        let floats = self.x.len() + self.y.len() + self.proj.len() + self.rec.len() + self.gu.len();
-        4 * (floats + self.logits.len()) + inputs
+        let floats = self.x.len()
+            + self.y.len()
+            + self.proj.len()
+            + self.rec.len()
+            + self.gu.len()
+            + self.router.len()
+            + self.moe.len();
+        4 * floats + inputs + self.route.size_bytes()
     }
 }

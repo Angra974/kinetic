@@ -47,6 +47,12 @@ pub struct Kernels {
     pub(crate) gemv_iq3_xxs_many: Rc<Kernel>,
     pub(crate) gemv_iq4_xs_many: Rc<Kernel>,
     pub(crate) gemv_q4_0_many: Rc<Kernel>,
+    pub(crate) moe_gemv_iq3_xxs: Rc<Kernel>,
+    pub(crate) moe_gemv_iq3_s: Rc<Kernel>,
+    pub(crate) moe_gemv_iq4_xs: Rc<Kernel>,
+    pub(crate) moe_route: Rc<Kernel>,
+    pub(crate) moe_swiglu: Rc<Kernel>,
+    pub(crate) moe_combine: Rc<Kernel>,
     pub(crate) quantize_q8: Rc<Kernel>,
     pub(crate) norm: Rc<Kernel>,
     pub(crate) swiglu: Rc<Kernel>,
@@ -69,6 +75,7 @@ impl Kernels {
     /// Builds the pipelines for the kernels embedded in this crate.
     pub fn load(device: &Rc<Device>) -> Result<Kernels> {
         let gemv = |name, spirv| Kernel::new(device, name, spirv, 6, 5);
+        let grouped = |name, spirv| Kernel::new(device, name, spirv, 6, 6);
         let attend = |name, spirv| Kernel::new(device, name, spirv, 7, 9);
         Ok(Kernels {
             gemv_f32: gemv("gemv_f32", spirv!("gemv_f32"))?,
@@ -105,6 +112,12 @@ impl Kernels {
             gemv_iq3_xxs_many: gemv("gemv_iq3_xxs_many", spirv!("gemv_iq3_xxs_many"))?,
             gemv_iq4_xs_many: gemv("gemv_iq4_xs_many", spirv!("gemv_iq4_xs_many"))?,
             gemv_q4_0_many: gemv("gemv_q4_0_many", spirv!("gemv_q4_0_many"))?,
+            moe_gemv_iq3_xxs: grouped("moe_gemv_iq3_xxs", spirv!("moe_gemv_iq3_xxs"))?,
+            moe_gemv_iq3_s: grouped("moe_gemv_iq3_s", spirv!("moe_gemv_iq3_s"))?,
+            moe_gemv_iq4_xs: grouped("moe_gemv_iq4_xs", spirv!("moe_gemv_iq4_xs"))?,
+            moe_route: Kernel::new(device, "moe_route", spirv!("moe_route"), 4, 2)?,
+            moe_swiglu: Kernel::new(device, "moe_swiglu", spirv!("moe_swiglu"), 5, 2)?,
+            moe_combine: Kernel::new(device, "moe_combine", spirv!("moe_combine"), 4, 2)?,
             quantize_q8: Kernel::new(device, "quantize_q8", spirv!("quantize_q8"), 3, 1)?,
             norm: Kernel::new(device, "norm", spirv!("norm"), 8, 5)?,
             swiglu: Kernel::new(device, "swiglu", spirv!("swiglu"), 5, 1)?,

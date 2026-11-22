@@ -5,6 +5,7 @@ use kinetic_vulkan::{Commands, ConvRing, DeltaState, Device, DeviceBuffer, KvCac
 use super::attention::VulkanAttention;
 use super::delta_net::VulkanDeltaNet;
 use super::ffn::VulkanFfn;
+use super::moe::VulkanMoe;
 use super::rope::RopeTables;
 use super::short_conv::VulkanShortConv;
 use super::work::{Needs, Work};
@@ -43,13 +44,44 @@ impl LayerState {
     }
 }
 
+/// The feed-forward of a layer: a dense one, or the routed experts of a
+/// mixture.
+enum VulkanFeed {
+    Dense(VulkanFfn),
+    Moe(VulkanMoe),
+}
+
+impl VulkanFeed {
+    fn record(&self, gpu: &Gpu, w: &Work, c: &mut Commands) -> R {
+        match self {
+            VulkanFeed::Dense(f) => f.record(gpu, w, c),
+            VulkanFeed::Moe(m) => m.record(gpu, w, c),
+        }
+    }
+
+    fn size_bytes(&self) -> usize {
+        match self {
+            VulkanFeed::Dense(f) => f.size_bytes(),
+            VulkanFeed::Moe(m) => m.size_bytes(),
+        }
+    }
+
+    /// The width of the activations this feed-forward reads.
+    fn n_ff(&self) -> usize {
+        match self {
+            VulkanFeed::Dense(f) => f.gate.rows(),
+            VulkanFeed::Moe(m) => m.n_ff(),
+        }
+    }
+}
+
 /// A decoder layer on the device; see [`Layer`].
 pub(super) struct VulkanLayer {
     pub mixer_norm: DeviceBuffer<f32>,
     mixer: VulkanMixer,
     mixer_out_norm: Option<DeviceBuffer<f32>>,
     ffn_norm: DeviceBuffer<f32>,
-    ffn: VulkanFfn,
+    ffn: VulkanFeed,
     ffn_out_norm: Option<DeviceBuffer<f32>>,
     residual_scale: f32,
     out_scale: f32,
@@ -66,19 +98,21 @@ impl VulkanLayer {
                 return Err(unsupported("Mamba-2 and parallel token mixers"))
             }
         };
-        if l.experts.is_some() {
-            return Err(unsupported("routed experts"));
-        }
-        let (Some(mixer_norm), Some(ffn_norm), Some(ffn)) = (&l.mixer_norm, &l.ffn_norm, &l.ffn)
-        else {
+        let (Some(mixer_norm), Some(ffn_norm)) = (&l.mixer_norm, &l.ffn_norm) else {
             return Err(unsupported("layers without input norms"));
+        };
+        let ffn = match (&l.ffn, &l.experts) {
+            (Some(f), None) => VulkanFeed::Dense(VulkanFfn::upload(gpu, f)?),
+            (None, Some(m)) => VulkanFeed::Moe(VulkanMoe::upload(gpu, m)?),
+            (Some(_), Some(_)) => return Err(unsupported("routed experts with a dense feed-forward")),
+            (None, None) => return Err(unsupported("layers without a feed-forward")),
         };
         Ok(VulkanLayer {
             mixer_norm: gpu.vector(mixer_norm)?,
             mixer,
             mixer_out_norm: optional(&l.mixer_out_norm)?,
             ffn_norm: gpu.vector(ffn_norm)?,
-            ffn: VulkanFfn::upload(gpu, ffn)?,
+            ffn,
             ffn_out_norm: optional(&l.ffn_out_norm)?,
             residual_scale: l.residual_scale.unwrap_or(1.0),
             out_scale: l.out_scale.unwrap_or(1.0),
@@ -104,7 +138,15 @@ impl VulkanLayer {
     }
 
     pub fn n_ff(&self) -> usize {
-        self.ffn.gate.rows()
+        self.ffn.n_ff()
+    }
+
+    /// The experts a mixture layer routes over, and how many run per token.
+    pub fn moe_shape(&self) -> Option<(usize, usize)> {
+        match &self.ffn {
+            VulkanFeed::Dense(_) => None,
+            VulkanFeed::Moe(m) => Some(m.shape()),
+        }
     }
 
     /// Past positions an attention mixer sees, when not all.

@@ -30,7 +30,7 @@ const Q8_BLOCK: usize = 32;
 const QUANTIZE_THREADS: usize = 64;
 
 /// Elements per kernel block for each type with a GEMV kernel.
-fn block_len(ty: TensorType) -> Option<usize> {
+pub(crate) fn block_len(ty: TensorType) -> Option<usize> {
     Some(match ty {
         TensorType::F32 => 4,
         TensorType::F16 => 8,

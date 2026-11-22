@@ -19,6 +19,7 @@
 mod attention;
 mod delta_net;
 mod ffn;
+mod moe;
 mod host;
 mod layer;
 mod mtp;
