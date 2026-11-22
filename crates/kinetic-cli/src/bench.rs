@@ -15,7 +15,6 @@ use crate::model_file::ModelFile;
 use crate::tech::{self, Tech};
 use crate::{gpu, Device, Result};
 
-const PROMPT_TOKENS: usize = 512;
 const GENERATED_TOKENS: usize = 128;
 pub const EDIT_TOKENS: usize = 256;
 /// Positions a benchmark sequence needs at most, past the depth.
@@ -28,6 +27,8 @@ pub struct Tests {
     pub repetitions: usize,
     /// Tokens in the context before the generation test.
     pub depth: usize,
+    /// Tokens in the prompt test.
+    pub prompt: usize,
 }
 
 /// The edit test's file: the answer is the file again with one name changed.
@@ -159,7 +160,7 @@ pub fn run(
             "load_seconds": load,
             "size_bytes": file.len(),
             "parameters": params,
-            "prefill_tokens": PROMPT_TOKENS,
+            "prefill_tokens": tests.prompt,
             "prefill_tokens_per_second": speeds.prefill,
             "decode_tokens": GENERATED_TOKENS,
             "decode_depth": tests.depth,
@@ -185,7 +186,7 @@ pub fn run(
         d => format!("tg{GENERATED_TOKENS} @ d{d}"),
     };
     for (test, speed) in [
-        (format!("pp{PROMPT_TOKENS}"), speeds.prefill),
+        (format!("pp{}", tests.prompt), speeds.prefill),
         (decode, speeds.decode),
         (format!("edit{EDIT_TOKENS}"), speeds.edit),
     ] {
@@ -269,7 +270,7 @@ fn plain<'a>(
     }
 }
 
-/// Runs pp512 and tg128 (after `tests.depth` tokens) on `plain`, which
+/// Runs the prompt test and tg128 (after `tests.depth` tokens) on `plain`, which
 /// never drafts, and the edit test on it and then, once `plain` is dropped,
 /// on the drafting backend that `drafting` makes.
 fn measure<P: Backend, D: Backend>(
@@ -285,7 +286,7 @@ fn measure<P: Backend, D: Backend>(
             .map(|i| (i.wrapping_mul(2_654_435_761) % vocab) as u32)
             .collect()
     };
-    let tokens = sequence(PROMPT_TOKENS);
+    let tokens = sequence(tests.prompt);
     let context = sequence(tests.depth.max(1));
     let sampling = Sampling {
         temperature: 1.0,
@@ -314,7 +315,7 @@ fn measure<P: Backend, D: Backend>(
         let t = plain.generate(&tokens, &job(1), &mut ignore);
         speeds.prefill = speeds
             .prefill
-            .max(PROMPT_TOKENS as f64 / t.prefill.as_secs_f64());
+            .max(tests.prompt as f64 / t.prefill.as_secs_f64());
         // The last token is sampled but never run, so one more is asked for.
         let t = plain.generate(&context, &job(GENERATED_TOKENS + 1), &mut ignore);
         speeds.decode = speeds

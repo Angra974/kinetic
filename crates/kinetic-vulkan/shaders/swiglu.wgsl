@@ -1,9 +1,19 @@
 // The gated feed-forward activation of each token row, written as a GEMV
-// input: out = silu(gate) * up, where a row of `gu` holds the `len` gate
-// values followed by the `len` up values.
+// input: out = act(gate) * up, where a row of `gu` holds the `len` gate
+// values followed by the `len` up values. `act` is SiLU, or GELU in its tanh
+// approximation when `gelu` is set, which makes the block a GeGLU.
 
 struct Shape {
     len: u32,
+    gelu: u32,
+}
+
+// GELU in its tanh approximation, as the CPU kernels compute it.
+fn activate(g: f32) -> f32 {
+    if shape.gelu == 0u {
+        return g / (1.0 + exp(-g));
+    }
+    return 0.5 * g * (1.0 + tanh(0.7978846 * (g + 0.044715 * g * g * g)));
 }
 
 var<immediate> shape: Shape;
@@ -28,5 +38,5 @@ fn main(
     }
     let g = gu[2u * row * shape.len + i];
     let u = gu[(2u * row + 1u) * shape.len + i];
-    put_q8(row * shape.len + i, g / (1.0 + exp(-g)) * u, lane);
+    put_q8(row * shape.len + i, activate(g) * u, lane);
 }

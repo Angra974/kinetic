@@ -21,8 +21,28 @@ const KERNELS: &[(&str, &str, &[&str])] = &[
         "",
         &["gemv_many", "k4", "gemv_q4_k_many"],
     ),
+    (
+        "gemv_q5_k_many",
+        "",
+        &["gemv_many", "k4", "gemv_q5_k_many"],
+    ),
+    ("gemv_q6_k_many", "", &["gemv_many", "gemv_q6_k_many"]),
     ("gemv_q5_k", "", &["gemv", "k4", "gemv_q5_k"]),
     ("gemv_q6_k", "", &["gemv", "gemv_q6_k"]),
+    ("gemv_iq3_xxs", "", &["gemv", "gemv_iq3_xxs"]),
+    ("gemv_iq4_xs", "", &["gemv", "gemv_iq4_xs"]),
+    ("gemv_q4_0", "", &["gemv", "gemv_q4_0"]),
+    (
+        "gemv_iq3_xxs_many",
+        "",
+        &["gemv_many", "gemv_iq3_xxs_many"],
+    ),
+    (
+        "gemv_iq4_xs_many",
+        "",
+        &["gemv_many", "gemv_iq4_xs_many"],
+    ),
+    ("gemv_q4_0_many", "", &["gemv_many", "gemv_q4_0_many"]),
     ("quantize_q8", "", &["quantize_q8"]),
     ("read_sum", "", &["read_sum"]),
     ("norm", "", &["norm", "put_q8"]),
@@ -42,6 +62,11 @@ const KERNELS: &[(&str, &str, &[&str])] = &[
     (
         "attend_256",
         "const PAIRS: u32 = 4u;",
+        &["attend", "put_q8"],
+    ),
+    (
+        "attend_512",
+        "const PAIRS: u32 = 8u;",
         &["attend", "put_q8"],
     ),
 ];

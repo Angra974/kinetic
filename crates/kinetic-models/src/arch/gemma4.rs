@@ -1,9 +1,12 @@
 //! Gemma 4. Sliding-window and full-attention layers with their own head
-//! sizes and rotary bases, GeGLU feed-forwards of per-layer widths and
-//! per-layer token inputs. The last layers project no keys or values of
-//! their own and attend over those of the last earlier layer of their kind.
-//! Image rows go in through [`crate::Input::Image`]: causal like text, at
-//! consecutive positions, with the padding token's per-layer input.
+//! sizes, key-value heads and rotary bases, and GeGLU feed-forwards. Files
+//! with `embedding_length_per_layer_input` also carry per-layer token inputs
+//! and scale each layer's output themselves; files without it have neither,
+//! and scale the output with their own `layer_output_scale` instead. The
+//! last layers project no keys or values of their own and attend over those
+//! of the last earlier layer of their kind. Image rows go in through
+//! [`crate::Input::Image`]: causal like text, at consecutive positions, with
+//! the padding token's per-layer input.
 
 use super::{Basics, Family, Stack};
 use crate::blocks::{Activation, Attention, Gate, Mixer, Rope, RopeLayout, SharedKv, SwiGlu};
@@ -21,13 +24,13 @@ fn build<'a>(l: &Loader<'a>, b: &Basics) -> Result<Stack<'a>, LoadError> {
     let (d, eps) = (b.d, b.eps);
     let n_layer = l.usize("block_count")?;
     let n_head = l.usize("attention.head_count")?;
-    let n_head_kv = l.usize("attention.head_count_kv")?;
-    if n_head_kv == 0 || !n_head.is_multiple_of(n_head_kv) {
+    // Full-attention layers keep a single key-value head per group, so the
+    // count is either one number or one per layer.
+    let n_head_kv = per_layer(l, "attention.head_count_kv", n_layer)?;
+    if n_head_kv.iter().any(|&kv| kv == 0 || !n_head.is_multiple_of(kv)) {
         return Err(LoadError("heads do not split into groups".into()));
     }
-    let n_ff = l.array("feed_forward_length", n_layer, |v| {
-        v.as_u64().map(|n| n as usize)
-    })?;
+    let n_ff = per_layer(l, "feed_forward_length", n_layer)?;
     let sliding = l.array("attention.sliding_window_pattern", n_layer, |v| v.as_bool())?;
     let window = l.usize("attention.sliding_window")?;
     let shared = l.usize_or("attention.shared_kv_layers", 0)?;
@@ -45,7 +48,7 @@ fn build<'a>(l: &Loader<'a>, b: &Basics) -> Result<Stack<'a>, LoadError> {
     let head_full = l.usize("attention.key_length")?;
     let head_swa = l.usize("attention.key_length_swa")?;
     let factors = l.optional_vector("rope_freqs.weight", head_full / 2)?;
-    let width = l.usize("embedding_length_per_layer_input")?;
+    let width = l.usize_or("embedding_length_per_layer_input", 0)?;
 
     let mut layers = Vec::with_capacity(n_layer);
     let mut inputs = Vec::with_capacity(n_layer);
@@ -70,13 +73,21 @@ fn build<'a>(l: &Loader<'a>, b: &Basics) -> Result<Stack<'a>, LoadError> {
             };
             (head_full, rope)
         };
-        let (q_dim, kv_dim) = (n_head * head_dim, n_head_kv * head_dim);
+        let kv_heads = n_head_kv[i];
+        let (q_dim, kv_dim) = (n_head * head_dim, kv_heads * head_dim);
         let kv_layer = source[i].unwrap_or(i);
         let kv = |s: &str| format!("blk.{kv_layer}.{s}");
+        let k = l.matrix(&kv("attn_k.weight"), d, kv_dim)?;
+        // the full-attention layers keep no values of their own and read the
+        // keys as values
+        let v = match l.header().tensor(&kv("attn_v.weight")) {
+            Some(_) => l.matrix(&kv("attn_v.weight"), d, kv_dim)?,
+            None => k,
+        };
         let attention = Attention {
             q: l.matrix(&t("attn_q.weight"), d, q_dim)?,
-            k: l.matrix(&kv("attn_k.weight"), d, kv_dim)?,
-            v: l.matrix(&kv("attn_v.weight"), d, kv_dim)?,
+            k,
+            v,
             o: l.matrix(&t("attn_output.weight"), q_dim, d)?,
             folding: None,
             gate: Gate::None,
@@ -87,7 +98,7 @@ fn build<'a>(l: &Loader<'a>, b: &Basics) -> Result<Stack<'a>, LoadError> {
             k_norm: Some(l.vector(&kv("attn_k_norm.weight"), head_dim)?),
             norm_after_rope: false,
             n_head,
-            n_head_kv,
+            n_head_kv: kv_heads,
             head_dim,
             rope,
             window: sliding[i].then_some(window),
@@ -113,29 +124,49 @@ fn build<'a>(l: &Loader<'a>, b: &Basics) -> Result<Stack<'a>, LoadError> {
             experts: None,
             ffn_out_norm: Some(l.vector(&t("post_ffw_norm.weight"), d)?),
             residual_scale: None,
+            out_scale: match width {
+                0 => l
+                    .optional_vector(&t("layer_output_scale.weight"), 1)?
+                    .map(|v| v[0]),
+                _ => None,
+            },
         });
-        inputs.push(LayerInput {
-            gate: l.matrix(&t("inp_gate.weight"), d, width)?,
-            proj: l.matrix(&t("proj.weight"), width, d)?,
-            norm: l.vector(&t("post_norm.weight"), d)?,
-            scale: l.vector(&t("layer_output_scale.weight"), 1)?[0],
-        });
+        if width > 0 {
+            inputs.push(LayerInput {
+                gate: l.matrix(&t("inp_gate.weight"), d, width)?,
+                proj: l.matrix(&t("proj.weight"), width, d)?,
+                norm: l.vector(&t("post_norm.weight"), d)?,
+                scale: l.vector(&t("layer_output_scale.weight"), 1)?[0],
+            });
+        }
     }
-    let n_vocab = l
-        .header()
-        .tensor("per_layer_token_embd.weight")
-        .map(|t| t.dims[1] as usize)
-        .ok_or_else(|| LoadError("missing tensor per_layer_token_embd.weight".into()))?;
-    let per_layer = PerLayer {
-        embd: l.matrix("per_layer_token_embd.weight", n_layer * width, n_vocab)?,
-        proj: l.matrix("per_layer_model_proj.weight", d, n_layer * width)?,
-        proj_norm: l.vector("per_layer_proj_norm.weight", width)?,
-        width,
-        layers: inputs,
-    };
+    let per_layer = (width > 0)
+        .then(|| -> Result<PerLayer<'a>, LoadError> {
+            let n_vocab = l
+                .header()
+                .tensor("per_layer_token_embd.weight")
+                .map(|t| t.dims[1] as usize)
+                .ok_or_else(|| LoadError("missing tensor per_layer_token_embd.weight".into()))?;
+            Ok(PerLayer {
+                embd: l.matrix("per_layer_token_embd.weight", n_layer * width, n_vocab)?,
+                proj: l.matrix("per_layer_model_proj.weight", d, n_layer * width)?,
+                proj_norm: l.vector("per_layer_proj_norm.weight", width)?,
+                width,
+                layers: inputs,
+            })
+        })
+        .transpose()?;
     Ok(Stack {
         layers,
         mtp: None,
-        per_layer: Some(per_layer),
+        per_layer,
+    })
+}
+
+/// A count written once, or one value per layer.
+fn per_layer(l: &Loader, key: &str, n_layer: usize) -> Result<Vec<usize>, LoadError> {
+    Ok(match l.hparam(key)?.as_u64() {
+        Some(n) => vec![n as usize; n_layer],
+        None => l.array(key, n_layer, |v| v.as_u64().map(|n| n as usize))?,
     })
 }

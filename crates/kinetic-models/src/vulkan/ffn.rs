@@ -1,6 +1,6 @@
 use kinetic_vulkan::{Commands, DeviceMatrix, Out, Rows};
 
-use super::layer::{unsupported, R};
+use super::layer::R;
 use super::work::Work;
 use super::Gpu;
 use crate::blocks::{Activation, SwiGlu};
@@ -11,17 +11,21 @@ pub(super) struct VulkanFfn {
     pub gate: DeviceMatrix,
     up: DeviceMatrix,
     down: DeviceMatrix,
+    /// Whether the gate goes through GELU rather than SiLU.
+    gelu: bool,
 }
 
 impl VulkanFfn {
     pub fn upload(gpu: &Gpu, f: &SwiGlu) -> Result<Self, LoadError> {
-        if f.activation != Activation::Silu {
-            return Err(unsupported("feed-forward activations other than SiLU"));
-        }
+        let gelu = match f.activation {
+            Activation::Silu => false,
+            Activation::Gelu => true,
+        };
         Ok(VulkanFfn {
             gate: gpu.matrix(&f.gate)?,
             up: gpu.matrix(&f.up)?,
             down: gpu.matrix(&f.down)?,
+            gelu,
         })
     }
 
@@ -44,7 +48,7 @@ impl VulkanFfn {
             Ok(())
         })?;
         let act = w.activations(n_ff);
-        k.swiglu(&w.batch, &w.gu, act, c)?;
+        k.swiglu(&w.batch, &w.gu, act, self.gelu, c)?;
         let out = Out {
             stride: w.d,
             offset: 0,

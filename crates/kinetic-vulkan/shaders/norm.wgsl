@@ -1,13 +1,15 @@
 // RMS norm of each token row of the batch, written as a GEMV input:
 // out = x * w / sqrt(mean(x * x) + eps). With ADD, x += scale * y first, in
 // place: the residual add that ends a block; with POST as well, y takes its
-// own norm, by the weights `post`, before it is added.
+// own norm, by the weights `post`, before it is added. `out_scale` then
+// multiplies x once, which some models do at the end of a layer.
 
 struct Shape {
     len: u32,
     eps: f32,
     flags: u32,
     scale: f32,
+    out_scale: f32,
 }
 
 // Bits of `flags`.
@@ -78,7 +80,7 @@ fn main(
             if (shape.flags & POST) != 0u {
                 a *= post_scale * post[i];
             }
-            v += a * shape.scale;
+            v = (v + a * shape.scale) * shape.out_scale;
             x[base + i] = v;
         }
         ss += v * v;

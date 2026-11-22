@@ -31,6 +31,7 @@ const NORM_AFTER_ROPE: u32 = 2u;
 const BIAS: u32 = 4u;
 const Q_NORM: u32 = 8u;
 const K_NORM: u32 = 16u;
+const V_NORM: u32 = 32u;
 
 var<immediate> shape: Shape;
 
@@ -50,6 +51,19 @@ fn norm(base: u32, w: u32, lane: u32) {
     let scale = 1.0 / sqrt(ss / f32(shape.head_dim) + shape.eps);
     for (var e = lane; e < shape.head_dim; e += 32u) {
         qkv[base + e] = qkv[base + e] * (scale * consts[w + e]);
+    }
+}
+
+fn norm_plain(base: u32, lane: u32) {
+    var ss = 0.0;
+    for (var e = lane; e < shape.head_dim; e += 32u) {
+        let v = qkv[base + e];
+        ss += v * v;
+    }
+    ss = subgroupAdd(ss);
+    let scale = 1.0 / sqrt(ss / f32(shape.head_dim) + shape.eps);
+    for (var e = lane; e < shape.head_dim; e += 32u) {
+        qkv[base + e] = qkv[base + e] * scale;
     }
 }
 
@@ -115,6 +129,10 @@ fn main(
     storageBarrier();
     if normed && after {
         norm(base, w, lane);
+    }
+    storageBarrier();
+    if slot >= shape.n_head + shape.n_kv && (shape.flags & V_NORM) != 0u {
+        norm_plain(base, lane);
     }
     storageBarrier();
 

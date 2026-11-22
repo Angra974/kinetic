@@ -74,7 +74,7 @@ fn random_matrix(ty: TensorType, rows: usize, cols: usize, rng: &mut Lcg) -> Vec
             let scale_offsets: &[usize] = match ty {
                 TensorType::Q4K | TensorType::Q5K => &[0, 2],
                 TensorType::Q6K => &[208],
-                TensorType::Q8_0 => &[0],
+                TensorType::Q8_0 | TensorType::IQ3XXS | TensorType::Q4_0 | TensorType::IQ4XS => &[0],
                 _ => unreachable!(),
             };
             let mut data: Vec<u8> = (0..blocks * size).map(|_| rng.next() as u8).collect();
@@ -221,10 +221,54 @@ fn q5_k_prompt_pass_has_the_same_bits() {
     check_prompt_pass(TensorType::Q5K, 3, 256, 16, 1);
 }
 
-// Types without a kernel for many tokens take the one they always take.
+#[test]
+fn q4_0_matches_reference() {
+    check(TensorType::Q4_0, 37, 2 * 32);
+    check(TensorType::Q4_0, 3, 32);
+}
+
+#[test]
+fn iq4_xs_matches_reference() {
+    check(TensorType::IQ4XS, 37, 2 * 256);
+    check(TensorType::IQ4XS, 3, 256);
+}
+
+#[test]
+fn iq3_xxs_matches_reference() {
+    check(TensorType::IQ3XXS, 37, 2 * 256);
+    check(TensorType::IQ3XXS, 3, 256);
+}
+
+/// Types without a kernel for many tokens take the one they always take.
+#[test]
+fn iq3_xxs_prompt_pass_has_the_same_bits() {
+    check_prompt_pass(TensorType::IQ3XXS, 37, 2 * 256, 32, 21);
+}
+
 #[test]
 fn q8_0_prompt_pass_has_the_same_bits() {
     check_prompt_pass(TensorType::Q8_0, 37, 2 * 256, 32, 21);
+}
+
+// Every block type a GEMV takes survives a prompt pass bit for bit, whether
+// or not it has a kernel of its own for many tokens: a type added without
+// one still runs the GEMV it always ran, and one whose kernel drifts is
+// caught here rather than in a benchmark.
+#[test]
+fn every_gemv_type_survives_a_prompt_pass() {
+    for ty in [
+        TensorType::F32,
+        TensorType::F16,
+        TensorType::Q8_0,
+        TensorType::Q4K,
+        TensorType::Q5K,
+        TensorType::Q6K,
+        TensorType::IQ3XXS,
+        TensorType::IQ4XS,
+        TensorType::Q4_0,
+    ] {
+        check_prompt_pass(ty, 37, 3 * 256, 40, 33);
+    }
 }
 
 #[test]

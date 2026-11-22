@@ -34,8 +34,12 @@ fn block_len(ty: TensorType) -> Option<usize> {
     Some(match ty {
         TensorType::F32 => 4,
         TensorType::F16 => 8,
-        TensorType::Q8_0 => 32,
-        TensorType::Q4K | TensorType::Q5K | TensorType::Q6K => 256,
+        TensorType::Q8_0 | TensorType::Q4_0 => 32,
+        TensorType::Q4K
+        | TensorType::Q5K
+        | TensorType::Q6K
+        | TensorType::IQ3XXS
+        | TensorType::IQ4XS => 256,
         _ => return None,
     })
 }
@@ -367,19 +371,15 @@ impl Kernels {
     /// workgroups takes; with `many`, the one written for a pass of many
     /// tokens, where the driver has it.
     fn gemv_kernel(&self, ty: TensorType, many: bool) -> (&Rc<Kernel>, usize) {
-        #[cfg(metal_driver)]
         if many {
             match ty {
                 TensorType::Q4K => return (&self.gemv_q4_k_many, MANY_ROWS_PER_GROUP),
                 TensorType::Q5K => return (&self.gemv_q5_k_many, MANY_ROWS_PER_GROUP),
                 TensorType::Q6K => return (&self.gemv_q6_k_many, MANY_ROWS_PER_GROUP),
+                TensorType::IQ3XXS => return (&self.gemv_iq3_xxs_many, MANY_ROWS_PER_GROUP),
+                TensorType::IQ4XS => return (&self.gemv_iq4_xs_many, MANY_ROWS_PER_GROUP),
+                TensorType::Q4_0 => return (&self.gemv_q4_0_many, MANY_ROWS_PER_GROUP),
                 _ => {}
-            }
-        }
-        #[cfg(not(metal_driver))]
-        {
-            if many && ty == TensorType::Q4K {
-                return (&self.gemv_q4_k_many, MANY_ROWS_PER_GROUP);
             }
         }
         let kernel = match ty {
@@ -389,6 +389,9 @@ impl Kernels {
             TensorType::Q4K => &self.gemv_q4_k,
             TensorType::Q5K => &self.gemv_q5_k,
             TensorType::Q6K => &self.gemv_q6_k,
+            TensorType::IQ3XXS => &self.gemv_iq3_xxs,
+            TensorType::IQ4XS => &self.gemv_iq4_xs,
+            TensorType::Q4_0 => &self.gemv_q4_0,
             _ => unreachable!("block_len admits only types with kernels"),
         };
         (kernel, ROWS_PER_GROUP)

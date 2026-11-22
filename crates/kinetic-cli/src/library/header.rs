@@ -15,6 +15,8 @@ pub struct Header {
     pub size: u64,
     /// Files the model is split into.
     pub parts: u32,
+    /// A LoRA adapter, which only makes sense applied to a model.
+    pub adapter: bool,
 }
 
 impl Header {
@@ -28,17 +30,25 @@ impl Header {
             Some((_, n)) => (shards_size(path, n), n),
             None => (file.len(), 1),
         };
+        let adapter = g.get("general.type").and_then(|v| v.as_str()) == Some("adapter")
+            || g.tensors.iter().any(|t| t.name.ends_with(".lora_a"));
         Ok(Header {
             arch,
             quant,
             size,
             parts,
+            adapter,
         })
     }
 
     /// Whether this is a vision projector rather than a model.
     pub fn is_projector(&self) -> bool {
         self.arch == "clip"
+    }
+
+    /// Whether this is a LoRA adapter rather than a model.
+    pub fn is_adapter(&self) -> bool {
+        self.adapter
     }
 
     /// Whether Kinetic runs it, and if not, why.

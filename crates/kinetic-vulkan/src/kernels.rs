@@ -36,12 +36,16 @@ pub struct Kernels {
     pub(crate) gemv_q4_k: Rc<Kernel>,
     /// The same sums for a pass of many tokens; see `shaders/gemv_many.wgsl`.
     pub(crate) gemv_q4_k_many: Rc<Kernel>,
-    #[cfg(metal_driver)]
     pub(crate) gemv_q5_k_many: Rc<Kernel>,
-    #[cfg(metal_driver)]
     pub(crate) gemv_q6_k_many: Rc<Kernel>,
     pub(crate) gemv_q5_k: Rc<Kernel>,
     pub(crate) gemv_q6_k: Rc<Kernel>,
+    pub(crate) gemv_iq3_xxs: Rc<Kernel>,
+    pub(crate) gemv_iq4_xs: Rc<Kernel>,
+    pub(crate) gemv_q4_0: Rc<Kernel>,
+    pub(crate) gemv_iq3_xxs_many: Rc<Kernel>,
+    pub(crate) gemv_iq4_xs_many: Rc<Kernel>,
+    pub(crate) gemv_q4_0_many: Rc<Kernel>,
     pub(crate) quantize_q8: Rc<Kernel>,
     pub(crate) norm: Rc<Kernel>,
     pub(crate) swiglu: Rc<Kernel>,
@@ -54,6 +58,7 @@ pub struct Kernels {
     pub(crate) attend_64: Rc<Kernel>,
     pub(crate) attend_128: Rc<Kernel>,
     pub(crate) attend_256: Rc<Kernel>,
+    pub(crate) attend_512: Rc<Kernel>,
     read_sum: Rc<Kernel>,
     /// The batch words of a pass of one token, for GEMVs outside a model.
     pub(crate) single: DeviceBuffer<u32>,
@@ -76,6 +81,10 @@ impl Kernels {
                 "gemv_q4_k_many",
                 include_bytes!("../shaders/metal/gemv_q4_k_many.metal"),
             )?,
+            #[cfg(not(metal_driver))]
+            gemv_q5_k_many: gemv("gemv_q5_k_many", spirv!("gemv_q5_k_many"))?,
+            #[cfg(not(metal_driver))]
+            gemv_q6_k_many: gemv("gemv_q6_k_many", spirv!("gemv_q6_k_many"))?,
             #[cfg(metal_driver)]
             gemv_q5_k_many: gemv(
                 "gemv_q5_k_many",
@@ -88,8 +97,14 @@ impl Kernels {
             )?,
             gemv_q5_k: gemv("gemv_q5_k", spirv!("gemv_q5_k"))?,
             gemv_q6_k: gemv("gemv_q6_k", spirv!("gemv_q6_k"))?,
+            gemv_iq3_xxs: gemv("gemv_iq3_xxs", spirv!("gemv_iq3_xxs"))?,
+            gemv_iq4_xs: gemv("gemv_iq4_xs", spirv!("gemv_iq4_xs"))?,
+            gemv_q4_0: gemv("gemv_q4_0", spirv!("gemv_q4_0"))?,
+            gemv_iq3_xxs_many: gemv("gemv_iq3_xxs_many", spirv!("gemv_iq3_xxs_many"))?,
+            gemv_iq4_xs_many: gemv("gemv_iq4_xs_many", spirv!("gemv_iq4_xs_many"))?,
+            gemv_q4_0_many: gemv("gemv_q4_0_many", spirv!("gemv_q4_0_many"))?,
             quantize_q8: Kernel::new(device, "quantize_q8", spirv!("quantize_q8"), 3, 1)?,
-            norm: Kernel::new(device, "norm", spirv!("norm"), 8, 4)?,
+            norm: Kernel::new(device, "norm", spirv!("norm"), 8, 5)?,
             swiglu: Kernel::new(device, "swiglu", spirv!("swiglu"), 5, 1)?,
             argmax: Kernel::new(device, "argmax", spirv!("argmax"), 3, 1)?,
             rope: Kernel::new(device, "rope", spirv!("rope"), 5, 13)?,
@@ -100,6 +115,7 @@ impl Kernels {
             attend_64: attend("attend_64", spirv!("attend_64"))?,
             attend_128: attend("attend_128", spirv!("attend_128"))?,
             attend_256: attend("attend_256", spirv!("attend_256"))?,
+            attend_512: attend("attend_512", spirv!("attend_512"))?,
             read_sum: Kernel::new(device, "read_sum", spirv!("read_sum"), 2, 1)?,
             single: DeviceBuffer::from_slice(device, &[1, 0, 0, 1])?,
         })

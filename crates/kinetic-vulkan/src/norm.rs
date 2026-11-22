@@ -6,11 +6,13 @@ use crate::kernels::Kernels;
 use crate::memory::DeviceBuffer;
 
 /// A residual add to run before a norm: `x += scale * y`, where `y` first
-/// takes an RMS norm by the weights `post` when given.
+/// takes an RMS norm by the weights `post` when given, and `out_scale`
+/// multiplies `x` once the add is in.
 pub struct Residual<'a> {
     pub y: &'a DeviceBuffer<f32>,
     pub post: Option<&'a DeviceBuffer<f32>>,
     pub scale: f32,
+    pub out_scale: f32,
 }
 
 impl Kernels {
@@ -46,11 +48,12 @@ impl Kernels {
         }
         let (y, scale) = add.as_ref().map_or((x, 0.0), |a| (a.y, a.scale));
         let post = add.as_ref().and_then(|a| a.post);
+        let out_scale = add.as_ref().map_or(1.0, |a| a.out_scale);
         let flags = u32::from(add.is_some()) | (u32::from(post.is_some()) << 1);
         let [ox, oq, od] = out.outputs();
         // SAFETY: matches norm.wgsl: the batch, x, y, weight, the three
         // output buffers and the post weights at bindings 0..7, then length,
-        // eps, flags and scale. Every buffer holds the batch's rows, checked
+        // eps, flags, scale and the output scale. Every buffer holds the batch's rows, checked
         // above, and workgroups past the pass's tokens return early; `y` is
         // read only with an add and the post weights only when given.
         unsafe {
@@ -66,7 +69,13 @@ impl Kernels {
                     od,
                     post.unwrap_or(weight).allocation(),
                 ],
-                &[len as u32, eps.to_bits(), flags, scale.to_bits()],
+                &[
+                    len as u32,
+                    eps.to_bits(),
+                    flags,
+                    scale.to_bits(),
+                    out_scale.to_bits(),
+                ],
                 [rows as u32, 1, 1],
             )
         };

@@ -150,6 +150,7 @@ fn choices(speeds: &Speeds, gpu_memory: u64, ram_free: u64, found: Vec<Local>) -
             let h = l.header.as_ref().ok()?;
             let chats = h.support() == "yes"
                 && !h.is_projector()
+                && !h.is_adapter()
                 && !crate::is_embedding_model(&l.path).unwrap_or(true);
             let runs = chats.then(|| speeds.file(&l.path).ok())??;
             let size = h.size;

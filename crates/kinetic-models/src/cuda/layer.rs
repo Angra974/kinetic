@@ -279,6 +279,7 @@ impl CudaLayer {
             experts,
             ffn_out_norm: optional(&l.ffn_out_norm)?,
             residual_scale: l.residual_scale.unwrap_or(1.0),
+            out_scale: l.out_scale.unwrap_or(1.0),
             eps,
             kv_source: l.mixer.kv_source(),
             input: None,
@@ -399,7 +400,7 @@ impl CudaLayer {
         let fed = AddNorm {
             post: self.ffn_out_norm.as_ref(),
             scale: self.residual_scale,
-            out_scale: 1.0,
+            out_scale: self.out_scale,
             next: if self.input.is_some() { None } else { next },
             eps: self.eps,
         };
