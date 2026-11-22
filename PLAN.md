@@ -53,7 +53,7 @@ Reprises du §7.10 du document et du skill `inference-optimisation` :
 | iGPU | Radeon 610M `gfx1036`, 2 CU |
 | Vulkan | 1.4.354 RADV / Mesa 26.1.6, sous-groupe 32–64 |
 | ROCm | 7.2.0, `hipcc` gfx1201 |
-| CUDA | absent |
+| CUDA | **absent** : aucun GPU NVIDIA, Kinetic compilé sans CUDA — rien à construire ni à mesurer ici |
 | llama.cpp de référence | `build-vulkan/bin/llama-bench` (Vulkan0) |
 
 Dépôt : fork `Angra974/kinetic`, remote `fork`, branche unique `main`. `upstream`
@@ -151,10 +151,18 @@ multimodal, énumération des devices. Python/Node/Go générés depuis l'ABI.
 Row/tensor split, `--override-tensor`, `--main-gpu`, cache MoE explicite. Sur cette
 machine, seul le layer split dGPU + iGPU est exploitable (iGPU 2 CU).
 
-### P2 — Parité non mesurable ici (L/XL)
+### Hors périmètre de ce journal
 
-CUDA BF16/NVFP4/FP8, SYCL, Metal natif, CANN, MUSA, WebGPU, RPC, diffusion,
-entraînement. À traiter pour la parité, sans bloquer les priorités locales.
+CUDA, SYCL, Metal natif, CANN, MUSA, WebGPU, RPC, diffusion, entraînement. Ce sont des
+capacités de llama.cpp, mais **aucune ne se construit ni ne se mesure sur cette
+machine** : pas de GPU NVIDIA (donc CUDA inutilisable), pas de cible SYCL/Metal/CANN,
+et pas de scénario d'entraînement. Les garder dans la file reviendrait à planifier du
+travail invérifiable ; ils restent dans l'annexe E du document, pas ici.
+
+Conséquence pour les tableaux du document : une colonne CUDA y décrit l'état du crate
+`kinetic-cuda` (code existant, non exécutable ici), elle ne décrit pas un travail à
+faire. NVFP4 et F8_E4M3 restent en P0.4 uniquement pour le runtime CPU/Vulkan/HIP —
+les bénéficiaires NVIDIA ne sont pas concernés par ce journal.
 
 ---
 

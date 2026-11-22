@@ -917,7 +917,7 @@ est wave32, n'a pas les mêmes primitives que CDNA (pas de MFMA), et la disponib
 BF16/FP8 doit être vérifiée sur `gfx1201`. Le chemin sûr est FP16 + int8, puis BF16
 si `__hip_bfloat16` et les instructions correspondantes sont validées.
 
-### 5.8 `kinetic-cuda` (parité NVIDIA, secondaire)
+### 5.8 `kinetic-cuda` (hors périmètre local : aucune machine CUDA)
 
 Ce backend reste utile pour les utilisateurs NVIDIA et comme référence de kernels,
 mais il est **hors priorité locale** : aucun GPU CUDA n'est présent sur la machine.
@@ -1220,7 +1220,7 @@ elle, est déjà écrite en flash-style avec online softmax (`shaders/attend.wgs
 GQA et SWA : il ne faut pas la compter comme un manque, seulement comme un noyau à
 régler.
 
-### 7.4 CUDA (parité NVIDIA, secondaire)
+### 7.4 CUDA (hors périmètre local : aucune machine CUDA)
 
 | Module | Description | Gain |
 |---|---|---|
@@ -1493,7 +1493,7 @@ premières 30 s) ne sont pas comparables et doivent être étiquetés séparéme
 | **P1.6** | **Vulkan avancé** : MoE, layer split, flash, KV q4/q5 | élevé | L/XL | élevé |
 | **P1.7** | Multi-GPU row/tensor + override | moyen | XL | élevé |
 | **P1.8** | **CPU AVX-512/VNNI + repack** (Zen 4 local) | moyen | L | faible |
-| **P2.1** | CUDA BF16/NVFP4/FP8, IQ denses, row/tensor split (NVIDIA) | élevé | L | moyen |
+| **P2.1** | CUDA BF16/NVFP4/FP8, IQ denses, row/tensor split | **hors périmètre** (aucune machine CUDA) | — | — |
 | **P2.2** | SYCL/Metal, CPU AMX/i8mm/SVE, NUMA | moyen | L/XL | moyen |
 | **P2.3** | Responses/Anthropic/realtime/TTS | moyen | L/XL | moyen |
 | **P3** | Long tail, diffusion, training, RPC, bindings | variable | XL | variable |
@@ -1505,9 +1505,9 @@ le préfill à 23 % (262 contre 1154 t/s). Un backend HIP complet (L/XL, risque 
 récupérerait au mieux quelques pour cent de décodage, alors qu'un GEMM tuilé (L)
 attaque le seul écart qui reste. P0.1, P0.4 et P0.5 avancent en parallèle car ils ne
 dépendent pas du backend. P1.5/P1.6 sont la suite naturelle : ils transforment un
-backend qui « fonctionne » en backend qui « gagne ». P2.1 (CUDA) reste utile pour la
-parité, mais ne doit pas consommer le temps de l'équipe avant que Vulkan soit
-compétitif.
+backend qui « fonctionne » en backend qui « gagne ». P2.1 (CUDA) est **hors
+périmètre** : sans machine CUDA, on ne peut ni l'écrire sérieusement ni le mesurer, et
+il ne doit donc pas figurer dans la file de travail.
 
 ---
 
@@ -1773,8 +1773,9 @@ la priorité est encore plus nette :
 2. **Vulkan** : GEMM de prompt, coopmat, types IQ, KV quantifié, MoE, layer split.
 3. **Le reste de la parité** : architectures, tokenizers, sampling, routes, outils.
 
-CUDA reste dans le plan pour les utilisateurs NVIDIA, mais il ne doit pas être le
-premier chantier d'une équipe qui n'a pas de GPU NVIDIA. Les différenciateurs de
+CUDA sort du plan : cette équipe n'a pas de GPU NVIDIA, donc ni moyen de l'écrire ni
+moyen de le mesurer. Les lignes CUDA qui restent dans les tableaux décrivent le crate
+existant, pas un chantier. Les différenciateurs de
 Kinetic — RAD-1, Warm Start, Zero Wait, Shortlist, Flywheel, Convoy, l'exactitude et
 les receipts — doivent rester le cœur du produit. La parité doit les rendre **plus
 utiles**, pas les remplacer.
