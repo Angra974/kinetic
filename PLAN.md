@@ -195,6 +195,7 @@ les bénéficiaires NVIDIA ne sont pas concernés par ce journal.
 | G5 | `qwen3moe` refusé au chargement, experts routés et IQ3_S absents du Vulkan : le 30B A3B retombait sur le CPU | `6141b3b`, `7714f86`, `c729c30` | même fichier chargé sur Vulkan, 1er token identique à la CPU, sorties cohérentes ; passe routée comparée au host sur 3 tokens et 3 types d'experts ; 91 tests modèles + 21 GEMV + 1 MoE verts | le modèle tourne sur GPU : pp512 489 t/s, tg128 55,7 t/s |
 | G6 | `qwen35moe` refusé sur Vulkan (expert partagé, routage sigmoïde) et experts Q4_K/Q6_K sans noyau groupé : le 35B A3B retombait sur le CPU | `5457f06` | 6 tests MoE contre le host (sigmoïde gated/plain, Q4_K, Q6_K) et 34 tests `kinetic-vulkan` verts ; le fichier se charge et génère sur Vulkan | génération 11,9 → 26,8 t/s, prompt 16,5 → 91 t/s |
 | G7 | Un modèle plus gros que la VRAM déversait en RAM système tout ce qu'il téléversait en dernier, tête de sortie et poids denses compris, relus à chaque token par le bus | `7598ca2` | profil par timestamps GPU : tête 16,4 → 1,45 ms par token, couches 29-40 à 2,5 ms contre 0,66 ms pour les précédentes ; même sortie au token près ; 34 tests `kinetic-vulkan` verts | génération 25,7 → 33,5 t/s, préfill 92,6 → 92,9 t/s |
+| G8 | Aucune découpe GPU/CPU sur Vulkan : `--gpu-layers` y était accepté et ignoré, et un modèle plus gros que la VRAM relisait ses couches par le PCIe | `2c6c03b` | `kinetic bench --gpu-layers 31` : 9 des 40 couches sur le CPU, sortie cohérente, 34 tests `kinetic-vulkan` verts, défaut inchangé au token près | découpe mesurée plus lente que le placement en place : tg128 16,8 contre 30,8 t/s, pp512 167 contre 205 ; elle reste optionnelle |
 | G4 | Prétokenizer `tekken` absent : `helcyon-gpt-4o-v4.5` refusé au chargement | non committé | mêmes ids que `llama-tokenize` sur 26 lignes de contrôle et sur un fichier entier (83 tokens, identiques), 22 nov. ; 28 tests tokenizer verts ; génération Vulkan 77,3 t/s | le modèle se charge et génère |
 
 G1 et G2 ferment une partie de **§4.3 formats** et amorcent **P0.2** ; G3 ferme la
@@ -254,8 +255,10 @@ préfill ne bouge pas : il est borné par le calcul, pas par le bus.
 
 Ce qui reste : les experts hébergés en RAM système coûtent encore leur lecture
 PCIe à chaque token. Les exécuter sur le CPU pour les couches concernées, comme
-le fait llama.cpp avec `-ngl`, remplacerait ce bus par la RAM à pleine bande ;
-c'est une découpe GPU/CPU pour le backend Vulkan, pas un réglage.
+le fait llama.cpp avec `-ngl`, devait remplacer ce bus par la RAM à pleine
+bande ; G8 a implémenté cette découpe et l'a mesurée : elle est plus lente que
+le placement en place, la couche CPU de Kinetic coûtant plus cher que la
+pénalité PCIe qu'elle évite.
 
 ### Mesures pp512 / tg128 du 35B (22 nov. 2026)
 
@@ -282,6 +285,31 @@ G6 : à 18 tokens kinetic était devant (91 contre 82 t/s), mais à 512 il est 3
 sous llama. Le préfill est borné par le calcul, et c'est le résidu P0.2 des noyaux
 many-token, pas le placement des poids — le débordement ne coûte qu'une lecture
 par passe, pas par token.
+
+### Découpe GPU/CPU du 35B (22 nov. 2026)
+
+La découpe de llama.cpp, portée sur Vulkan : `--gpu-layers N` (défaut : toutes)
+place les `N` dernières couches sur le périphérique, les premières tournent sur
+le CPU avec les mêmes opérations que le chemin CPU, et seuls `n_embd` flottants
+par token traversent. `kinetic bench --gpu-layers N` la mesure.
+
+| Test | llama-bench `-ngl 31` | kinetic défaut | kinetic `--gpu-layers 31` |
+|---|---:|---:|---:|
+| pp512 | 642,67 t/s | 205,46 t/s | 167,11 t/s |
+| tg128 | 43,33 t/s | 30,84 t/s | 16,83 t/s |
+| génération, `run`, 18 tokens de prompt | 39,2-40,7 t/s | 33,6 t/s | 20,8 t/s (5 tokens, EOS) |
+
+La découpe perd : 9 couches sur le CPU coûtent environ 4,3 ms par token chacune,
+quand la même couche hébergée en RAM système ne coûte que sa lecture PCIe, de
+l'ordre de 1,8 ms. llama.cpp ne gagne avec `-ngl` que parce que sa couche CPU lui
+coûte bien moins, autour de 0,8 ms. Le préfill perd aussi (167 contre 205 t/s),
+les couches hôte n'ayant pas de noyau many-token côté CPU.
+
+Conséquence : la découpe est livrée mais **optionnelle**, le défaut reste le
+placement de G7 — les 40 couches sur le périphérique, les experts prenant le
+débordement —, au même débit et au token près. Sous `--gpu-layers`, la sortie
+diverge de celle du défaut, comme entre les chemins CPU et Vulkan : les couches
+hôte calculent en f32 sur le CPU, le périphérique non.
 
 ### Mesures de G5 (22 nov. 2026)
 
