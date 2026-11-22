@@ -242,6 +242,8 @@ pub(super) struct CudaLayer {
     pub experts: Option<CudaExperts>,
     ffn_out_norm: Option<DeviceBuffer<f32>>,
     residual_scale: f32,
+    /// Scales the layer's output into the residual, for Gemma 4's widths.
+    out_scale: f32,
     eps: f32,
     /// The layer whose keys and values this one attends over.
     pub kv_source: Option<usize>,
