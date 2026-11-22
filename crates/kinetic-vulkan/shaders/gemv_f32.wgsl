@@ -2,6 +2,6 @@
 
 const LANES: u32 = 1u;
 
-fn block_dot(total: u32, blk: u32, b: u32, part: u32) -> f32 {
-    return dot(bitcast<vec4<f32>>(w[blk]), x[b]);
+fn block_dot(base: u32, total: u32, blk: u32, b: u32, part: u32) -> f32 {
+    return dot(bitcast<vec4<f32>>(w[base + blk]), x[b]);
 }

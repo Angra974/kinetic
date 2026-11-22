@@ -1,10 +1,10 @@
 // block_q5_K: d, dmin, scales[12], qh[32], qs[128]; 176 bytes, eleven words.
 // Bit t of qh[l] is the fifth bit of element l of sub-block t.
 
-fn block_dot(total: u32, blk: u32, b: u32, j: u32) -> f32 {
-    let head = w[blk * 11u];
-    let qh = w[blk * 11u + 1u + j % 2u];
-    let q = w[blk * 11u + 3u + j];
+fn block_dot(base: u32, total: u32, blk: u32, b: u32, j: u32) -> f32 {
+    let head = w[base + blk * 11u];
+    let qh = w[base + blk * 11u + 1u + j % 2u];
+    let q = w[base + blk * 11u + 3u + j];
     let xi = k4_input(b, j);
     let s = 2u * (j / 2u);
     let ones = vec4<u32>(0x01010101u);

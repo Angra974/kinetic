@@ -5,13 +5,13 @@
 
 const LANES: u32 = 8u;
 
-fn block_dot(total: u32, blk: u32, b: u32, part: u32) -> f32 {
+fn block_dot(base: u32, total: u32, blk: u32, b: u32, part: u32) -> f32 {
     // The nibble plane is one 16-byte word a block, so the f16 plane starts
     // at word `total`.
     let d = f16_at(total, blk);
     let low = part < 4u;
     let at = part % 4u;
-    let q = w[blk][at];
+    let q = w[base + blk][at];
     var packed = 0u;
     for (var t = 0u; t < 4u; t++) {
         let byte = (q >> (8u * t)) & 0xFFu;

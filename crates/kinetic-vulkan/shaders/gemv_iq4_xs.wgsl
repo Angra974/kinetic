@@ -21,18 +21,18 @@ fn u16_at(base: u32, i: u32) -> u32 {
     return select(word & 0xFFFFu, word >> 16u, (i & 1u) == 1u);
 }
 
-fn block_dot(total: u32, blk: u32, b: u32, part: u32) -> f32 {
+fn block_dot(base: u32, total: u32, blk: u32, b: u32, part: u32) -> f32 {
     // The planes: f16 d, u16 scales_h, u8 scales_l[4], u8 qs[128].
     let short = (total + 7u) / 8u;
     let l_base = 2u * short;
     let qs_base = l_base + (total + 3u) / 4u;
-    let d = f16_at(0u, blk);
-    let h = u16_at(short, blk);
-    let l = w[l_base + blk / 4u];
+    let d = f16_at(base + 0u, blk);
+    let h = u16_at(base + short, blk);
+    let l = w[base + l_base + blk / 4u];
     let hw = bitcast<u32>(h) >> (2u * part) & 3u;
     let lw = (l[blk % 4u] >> (8u * (part / 2u) + 4u * (part % 2u))) & 0x0Fu;
     let dl = d * f32(i32(lw | (hw << 4u)) - 32);
-    let qs = w[qs_base + 8u * blk + part];
+    let qs = w[base + qs_base + 8u * blk + part];
     let e0 = xq[b * 16u + 2u * part];
     let e1 = xq[b * 16u + 2u * part + 1u];
     var sum = 0i;

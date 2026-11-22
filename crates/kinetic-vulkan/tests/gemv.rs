@@ -74,7 +74,11 @@ fn random_matrix(ty: TensorType, rows: usize, cols: usize, rng: &mut Lcg) -> Vec
             let scale_offsets: &[usize] = match ty {
                 TensorType::Q4K | TensorType::Q5K => &[0, 2],
                 TensorType::Q6K => &[208],
-                TensorType::Q8_0 | TensorType::IQ3XXS | TensorType::Q4_0 | TensorType::IQ4XS => &[0],
+                TensorType::Q8_0
+                | TensorType::IQ3XXS
+                | TensorType::IQ3S
+                | TensorType::Q4_0
+                | TensorType::IQ4XS => &[0],
                 _ => unreachable!(),
             };
             let mut data: Vec<u8> = (0..blocks * size).map(|_| rng.next() as u8).collect();
@@ -239,6 +243,12 @@ fn iq3_xxs_matches_reference() {
     check(TensorType::IQ3XXS, 3, 256);
 }
 
+#[test]
+fn iq3_s_matches_reference() {
+    check(TensorType::IQ3S, 37, 2 * 256);
+    check(TensorType::IQ3S, 3, 256);
+}
+
 /// Types without a kernel for many tokens take the one they always take.
 #[test]
 fn iq3_xxs_prompt_pass_has_the_same_bits() {
@@ -264,6 +274,7 @@ fn every_gemv_type_survives_a_prompt_pass() {
         TensorType::Q5K,
         TensorType::Q6K,
         TensorType::IQ3XXS,
+        TensorType::IQ3S,
         TensorType::IQ4XS,
         TensorType::Q4_0,
     ] {

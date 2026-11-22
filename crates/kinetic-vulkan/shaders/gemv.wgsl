@@ -87,11 +87,11 @@ fn main(
         var b = lane / LANES;
         // two blocks per step keep two weight loads in flight
         for (; b + step < n; b += 2u * step) {
-            sum += block_dot(total, first + b, xb + b, part)
-                + block_dot(total, first + b + step, xb + b + step, part);
+            sum += block_dot(0u, total, first + b, xb + b, part)
+                + block_dot(0u, total, first + b + step, xb + b + step, part);
         }
         if b < n {
-            sum += block_dot(total, first + b, xb + b, part);
+            sum += block_dot(0u, total, first + b, xb + b, part);
         }
         sum = subgroupAdd(sum);
         if lane == 0u {
@@ -102,10 +102,10 @@ fn main(
 
 fn dot4(total: u32, blk: u32, xs: vec4<u32>, part: u32) -> vec4<f32> {
     return vec4<f32>(
-        block_dot(total, blk, xs.x, part),
-        block_dot(total, blk, xs.y, part),
-        block_dot(total, blk, xs.z, part),
-        block_dot(total, blk, xs.w, part),
+        block_dot(0u, total, blk, xs.x, part),
+        block_dot(0u, total, blk, xs.y, part),
+        block_dot(0u, total, blk, xs.z, part),
+        block_dot(0u, total, blk, xs.w, part),
     );
 }
 

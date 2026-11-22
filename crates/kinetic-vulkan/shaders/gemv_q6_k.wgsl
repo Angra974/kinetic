@@ -17,13 +17,13 @@ fn sbyte(v: vec4<u32>, i: u32) -> f32 {
     return f32(extractBits(bitcast<i32>(v[i / 4u]), 8u * (i % 4u), 8u));
 }
 
-fn block_dot(total: u32, blk: u32, b: u32, j: u32) -> f32 {
+fn block_dot(base: u32, total: u32, blk: u32, b: u32, j: u32) -> f32 {
     let n = j / 4u;
     let k = j % 4u;
     let g = k / 2u;
 
-    let lq = w[blk * 8u + j];
-    let hq = w[total * 8u + blk * 4u + 2u * n + (k & 1u)];
+    let lq = w[base + blk * 8u + j];
+    let hq = w[base + total * 8u + blk * 4u + 2u * n + (k & 1u)];
     let e = b * 256u + 128u * n + 32u * g + 16u * (k & 1u);
     let x0 = xq[e / 16u];
     let x1 = xq[e / 16u + 4u];
@@ -37,7 +37,7 @@ fn block_dot(total: u32, blk: u32, b: u32, j: u32) -> f32 {
     let s0 = dot16(lo, x0) - dot16(bias, x0);
     let s1 = dot16(hi, x1) - dot16(bias, x1);
 
-    let scales = w[total * 12u + blk];
+    let scales = w[base + total * 12u + blk];
     let sc = 8u * n + (k & 1u) + 2u * g;
     let r = sbyte(scales, sc) * xd[e / 32u].x * f32(s0)
         + sbyte(scales, sc + 4u) * xd[e / 32u + 2u].x * f32(s1);

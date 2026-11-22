@@ -1,7 +1,7 @@
 //! Device layout of weight matrices.
 //!
-//! Q6_K (210-byte), Q8_0 (34-byte) and IQ3_XXS (98-byte) blocks are not
-//! 16-byte aligned, so kernels could not read them as 16-byte words. On the
+//! Q6_K (210-byte), Q8_0 (34-byte), IQ3_S (110-byte) and IQ3_XXS (98-byte)
+//! blocks are not 16-byte aligned, so kernels could not read them as 16-byte words. On the
 //! device their fields are stored planar instead: each field of every block
 //! in turn, so every plane starts aligned. Only IQ3_XXS needs its first
 //! plane padded, its field being two bytes long.
@@ -15,6 +15,7 @@ const Q6_K_FIELDS: &[(usize, usize)] = &[(0, 128), (128, 64), (192, 16), (208, 2
 const Q8_0_FIELDS: &[(usize, usize)] = &[(2, 32), (0, 2)];
 const IQ3_XXS_FIELDS: &[(usize, usize)] = &[(0, 2), (2, 64), (66, 32)];
 const IQ4_XS_FIELDS: &[(usize, usize)] = &[(0, 2), (2, 2), (4, 4), (8, 128)];
+const IQ3_S_FIELDS: &[(usize, usize)] = &[(0, 2), (2, 64), (66, 8), (74, 32), (106, 4)];
 const Q4_0_FIELDS: &[(usize, usize)] = &[(2, 16), (0, 2)];
 
 /// The bytes of `m` as the GEMV kernels expect them.
@@ -24,6 +25,7 @@ pub(crate) fn device_layout<'a>(m: &Matrix<'a>) -> Cow<'a, [u8]> {
         TensorType::Q8_0 => (Q8_0_FIELDS, false),
         TensorType::IQ3XXS => (IQ3_XXS_FIELDS, true),
         TensorType::IQ4XS => (IQ4_XS_FIELDS, true),
+        TensorType::IQ3S => (IQ3_S_FIELDS, true),
         TensorType::Q4_0 => (Q4_0_FIELDS, false),
         _ => return Cow::Borrowed(m.data),
     };

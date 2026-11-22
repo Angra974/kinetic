@@ -39,6 +39,7 @@ fn block_len(ty: TensorType) -> Option<usize> {
         | TensorType::Q5K
         | TensorType::Q6K
         | TensorType::IQ3XXS
+        | TensorType::IQ3S
         | TensorType::IQ4XS => 256,
         _ => return None,
     })
@@ -390,6 +391,7 @@ impl Kernels {
             TensorType::Q5K => &self.gemv_q5_k,
             TensorType::Q6K => &self.gemv_q6_k,
             TensorType::IQ3XXS => &self.gemv_iq3_xxs,
+            TensorType::IQ3S => &self.gemv_iq3_s,
             TensorType::IQ4XS => &self.gemv_iq4_xs,
             TensorType::Q4_0 => &self.gemv_q4_0,
             _ => unreachable!("block_len admits only types with kernels"),

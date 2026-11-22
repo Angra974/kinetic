@@ -53,17 +53,17 @@ fn iq3_signed(mags: u32, signs: u32) -> u32 {
     return out;
 }
 
-fn block_dot(total: u32, blk: u32, b: u32, part: u32) -> f32 {
+fn block_dot(base: u32, total: u32, blk: u32, b: u32, part: u32) -> f32 {
     let d_words = (total + 7u) / 8u;
     let aux_words = d_words + 4u * total + 2u * blk;
-    let a4 = w[aux_words + part / 4u];
+    let a4 = w[base + aux_words + part / 4u];
     let a = a4[part % 4u];
-    let d = f16_at(0u, blk) * (0.5 + f32(a >> 28u)) * 0.5;
+    let d = f16_at(base + 0u, blk) * (0.5 + f32(a >> 28u)) * 0.5;
     var sum = 0i;
     for (var l = 0u; l < 4u; l++) {
         // The two index bytes of this group, always in one word.
         let at = 64u * blk + 8u * part + 2u * l;
-        let qs = w[d_words + at / 16u];
+        let qs = w[base + d_words + at / 16u];
         let shift = 8u * (at % 4u);
         let lo = (qs[(at % 16u) / 4u] >> shift) & 0xFFu;
         let hi = (qs[(at % 16u) / 4u] >> (shift + 8u)) & 0xFFu;
