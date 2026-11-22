@@ -114,7 +114,7 @@ pub use info::{DeviceInfo, DeviceKind, Features};
 pub use instance::Instance;
 pub use kernels::Kernels;
 pub use memory::{DeviceBuffer, DeviceCopy, HostBuffer};
-pub use moe::{DeviceExperts, Route};
+pub use moe::{DeviceExperts, Route, SharedMix};
 pub use norm::Residual;
 pub use physical::PhysicalDevice;
 pub use short_conv::ConvRing;

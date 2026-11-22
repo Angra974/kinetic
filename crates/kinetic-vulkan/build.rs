@@ -55,6 +55,8 @@ const KERNELS: &[(&str, &str, &[&str])] = &[
         "",
         &["moe_gemv", "gemv_iq4_xs"],
     ),
+    ("moe_gemv_q4_k", "", &["moe_gemv", "k4", "gemv_q4_k"]),
+    ("moe_gemv_q6_k", "", &["moe_gemv", "gemv_q6_k"]),
     ("moe_route", "", &["moe_route"]),
     ("moe_swiglu", "", &["moe_swiglu", "put_q8"]),
     ("moe_combine", "", &["moe_combine"]),

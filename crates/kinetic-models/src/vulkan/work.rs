@@ -26,6 +26,8 @@ pub(super) struct Work {
     ffn: Vec<GemvInput>,
     /// The router logits of the mixture layers, one row per token.
     router: DeviceBuffer<f32>,
+    /// The shared expert's gate, one logit per token.
+    shexp: DeviceBuffer<f32>,
     /// The routed experts' outputs, one row per slot.
     moe: DeviceBuffer<f32>,
     /// The router's choices for the pass.
@@ -84,9 +86,11 @@ impl Work {
             let needs = layer.needs();
             proj = proj.max(needs.proj);
             rec = rec.max(needs.rec);
-            n_ff = n_ff.max(layer.n_ff());
             add_width(&mut mixed, needs.width);
-            add_width(&mut ffn, layer.n_ff());
+            for width in layer.ffn_widths() {
+                n_ff = n_ff.max(width);
+                add_width(&mut ffn, width);
+            }
             if let Some((n_exp, k)) = layer.moe_shape() {
                 experts = experts.max(n_exp);
                 used = used.max(k);
@@ -112,6 +116,7 @@ impl Work {
             mixed: inputs(mixed)?,
             gu: f32s(wide * 2 * n_ff)?,
             router: f32s(rows * experts.max(1))?,
+            shexp: f32s(rows)?,
             moe: f32s(slots * d)?,
             route: Route::new(dev, slots)?,
             ffn: inputs(ffn)?,
@@ -146,6 +151,10 @@ impl Work {
         &self.moe
     }
 
+    pub fn shexp_gate(&self) -> &DeviceBuffer<f32> {
+        &self.shexp
+    }
+
     pub fn route(&self) -> &Route {
         &self.route
     }
@@ -165,6 +174,7 @@ impl Work {
             + self.rec.len()
             + self.gu.len()
             + self.router.len()
+            + self.shexp.len()
             + self.moe.len();
         4 * floats + inputs + self.route.size_bytes()
     }

@@ -3,8 +3,8 @@ use std::rc::Rc;
 use kinetic_quant::{Matrix, TensorType};
 
 use crate::batch::Batch;
-use crate::device::Device;
 use crate::commands::Commands;
+use crate::device::Device;
 use crate::error::{Error, Result};
 use crate::gemv::{block_len, GemvInput, Out};
 use crate::kernels::{Kernels, MAX_GROUPS};
@@ -101,6 +101,18 @@ impl DeviceExperts {
     }
 }
 
+/// How a mixture's output combines with the dense feed-forward of the layer
+/// holding it, when every token also runs that shared expert.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SharedMix {
+    /// The routed experts alone.
+    None,
+    /// Added to the shared expert's output as it stands.
+    Plain,
+    /// Added to the shared expert's output scaled by its sigmoid gate.
+    Gated,
+}
+
 /// What the router writes for each slot: the slot count, then each slot's
 /// expert matrix as a word offset, and each slot's weight.
 pub struct Route {
@@ -124,15 +136,20 @@ impl Route {
 }
 
 impl Kernels {
-    /// Records the router's choices for the pass's tokens: softmax over the
-    /// experts, the `k` likeliest per token, their normalized weights and
-    /// the word each slot's expert starts at. `logits` holds one row of
-    /// `experts` values per token.
+    /// Records the router's choices for the pass's tokens: a softmax, or a
+    /// sigmoid per expert when `sigmoid` says so, then the `k` likeliest per
+    /// token, their normalized weights and the word each slot's expert
+    /// starts at. `logits` holds one row of `experts` values per token, and
+    /// `bias` one value per expert, added to pick them but never to weigh
+    /// them.
+    #[allow(clippy::too_many_arguments)]
     pub fn moe_route(
         &self,
         batch: &Batch,
         logits: &DeviceBuffer<f32>,
         experts: &DeviceExperts,
+        bias: &DeviceBuffer<f32>,
+        sigmoid: bool,
         k: usize,
         route: &Route,
         commands: &mut Commands,
@@ -140,6 +157,7 @@ impl Kernels {
         let rows = batch.rows();
         if logits.len() < rows * experts.count()
             || route.weights.len() < rows * k
+            || bias.len() < experts.count()
         {
             return Err(Error::Shape(format!(
                 "routing {rows} tokens over {} experts into {} slots",
@@ -147,10 +165,10 @@ impl Kernels {
                 route.weights.len()
             )));
         }
-        // SAFETY: matches moe_route.wgsl: the batch, the logits, the slots
-        // and the weights at bindings 0..4, then the expert count, the
-        // picks per token and one expert's stride. The buffers hold the
-        // rows the batch can name, and rows past the pass return.
+        // SAFETY: matches moe_route.wgsl: the batch, the logits, the slots,
+        // the weights and the bias at bindings 0..5, then the expert count,
+        // the picks per token and the gating. The buffers hold the rows the
+        // batch can name, checked above, and rows past the pass return.
         unsafe {
             commands.dispatch(
                 &self.moe_route,
@@ -159,8 +177,9 @@ impl Kernels {
                     logits.allocation(),
                     route.slots.allocation(),
                     route.weights.allocation(),
+                    bias.allocation(),
                 ],
-                &[experts.count() as u32, k as u32],
+                &[experts.count() as u32, k as u32, sigmoid as u32],
                 [rows as u32, 1, 1],
             )
         };
@@ -185,6 +204,8 @@ impl Kernels {
             TensorType::IQ3XXS => &self.moe_gemv_iq3_xxs,
             TensorType::IQ3S => &self.moe_gemv_iq3_s,
             TensorType::IQ4XS => &self.moe_gemv_iq4_xs,
+            TensorType::Q4K => &self.moe_gemv_q4_k,
+            TensorType::Q6K => &self.moe_gemv_q6_k,
             other => return Err(Error::Unsupported(other)),
         };
         let block = block_len(experts.ty()).ok_or(Error::Unsupported(experts.ty()))?;
@@ -279,7 +300,8 @@ impl Kernels {
 
     /// Records the mix of the slots' outputs into the block's output: row
     /// `t` of `y` is the weighted sum of its `k` rows of `out`, which holds
-    /// one row of `d` values per slot.
+    /// one row of `d` values per slot, plus the shared expert's output `y`
+    /// already holds when `mix` asks for it, scaled by `gate` when gated.
     pub fn moe_combine(
         &self,
         route: &Route,
@@ -287,19 +309,21 @@ impl Kernels {
         y: &DeviceBuffer<f32>,
         d: usize,
         k: usize,
+        gate: &DeviceBuffer<f32>,
+        mix: SharedMix,
         commands: &mut Commands,
     ) -> Result<()> {
         let slots = route.weights.len();
-        if out.len() < slots * d || y.len() < slots / k * d {
+        if out.len() < slots * d || y.len() < slots / k * d || gate.len() < slots / k {
             return Err(Error::Shape(format!(
                 "combining {slots} slots into {} values of {d}",
                 y.len()
             )));
         }
         // SAFETY: matches moe_combine.wgsl: the slots, the weights, the
-        // routed outputs and the block's output at bindings 0..4, then the
-        // width and the picks per token; the buffers hold the rows the
-        // kernel can ask for, checked above.
+        // routed outputs, the block's output and the gate at bindings 0..5,
+        // then the width, the picks per token and the mix; the buffers hold
+        // the rows the kernel can ask for, checked above.
         unsafe {
             commands.dispatch(
                 &self.moe_combine,
@@ -308,8 +332,14 @@ impl Kernels {
                     route.weights.allocation(),
                     out.allocation(),
                     y.allocation(),
+                    gate.allocation(),
                 ],
-                &[d as u32, k as u32],
+                &[
+                    d as u32,
+                    k as u32,
+                    (mix != SharedMix::None) as u32,
+                    (mix == SharedMix::Gated) as u32,
+                ],
                 [d.div_ceil(256) as u32, (slots / k) as u32, 1],
             )
         };

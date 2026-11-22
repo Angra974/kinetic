@@ -1,4 +1,5 @@
-use kinetic_vulkan::{Commands, DeviceExperts, DeviceMatrix, Out, Rows};
+use kinetic_quant::{Matrix, TensorType};
+use kinetic_vulkan::{Commands, DeviceBuffer, DeviceExperts, DeviceMatrix, Out, Rows, SharedMix};
 
 use super::layer::R;
 use super::work::Work;
@@ -14,6 +15,14 @@ pub(super) struct VulkanMoe {
     gate: DeviceExperts,
     up: DeviceExperts,
     down: DeviceExperts,
+    /// The shared expert's gate as a single row, dotted with the block's
+    /// input to scale that expert's output.
+    shared_gate: Option<DeviceMatrix>,
+    /// One value per expert, added to a sigmoid's probabilities to pick the
+    /// experts; zero for a softmax.
+    bias: DeviceBuffer<f32>,
+    /// Whether the router takes a sigmoid per expert.
+    sigmoid: bool,
     /// Experts each token runs through.
     n_used: usize,
     n_ff: usize,
@@ -21,27 +30,42 @@ pub(super) struct VulkanMoe {
 
 impl VulkanMoe {
     pub fn upload(gpu: &Gpu, m: &Moe) -> Result<Self, LoadError> {
-        // The routing kernel spreads a softmax over the experts; the shared
-        // expert and the sigmoid gate of the other mixtures wait for their
-        // own kernels.
-        if !matches!(m.gating, Gating::Softmax) {
-            return Err(super::layer::unsupported("sigmoid-routed experts"));
-        }
-        if m.shared_gate.is_some() {
-            return Err(super::layer::unsupported("shared experts"));
-        }
+        let (bias, sigmoid) = match &m.gating {
+            // The router reads a bias per expert either way.
+            Gating::Softmax => (gpu.vector(&vec![0.0; m.n_experts()])?, false),
+            Gating::Sigmoid { bias } => (gpu.vector(bias)?, true),
+        };
+        let shared_gate = match m.shared_gate.as_deref() {
+            Some(g) => {
+                let bytes: Vec<u8> = g.iter().flat_map(|v| v.to_le_bytes()).collect();
+                Some(gpu.matrix(&Matrix::new(TensorType::F32, &bytes, 1, g.len()))?)
+            }
+            None => None,
+        };
         Ok(VulkanMoe {
             router: gpu.matrix(&m.router)?,
             gate: gpu.experts(&m.gate)?,
             up: gpu.experts(&m.up)?,
             down: gpu.experts(&m.down)?,
+            shared_gate,
+            bias,
+            sigmoid,
             n_used: m.n_used,
             n_ff: m.gate.rows,
         })
     }
 
+    /// How the experts mix with the layer's own feed-forward, when the layer
+    /// has one: behind the shared expert's gate, or as it stands.
+    pub fn mix(&self) -> SharedMix {
+        match self.shared_gate {
+            Some(_) => SharedMix::Gated,
+            None => SharedMix::Plain,
+        }
+    }
+
     pub fn size_bytes(&self) -> usize {
-        self.gate.size_bytes() + self.up.size_bytes() + self.down.size_bytes()
+        self.gate.size_bytes() + self.up.size_bytes() + self.down.size_bytes() + 4 * self.bias.len()
     }
 
     /// The experts it routes over, and how many run per token.
@@ -55,8 +79,9 @@ impl VulkanMoe {
     }
 
     /// Reads `w.h` and leaves the mixture's output in `w.y`, mixed by the
-    /// router's weights.
-    pub fn record(&self, gpu: &Gpu, w: &Work, c: &mut Commands) -> R {
+    /// router's weights and, when `mix` asks for it, added to the shared
+    /// expert's output `w.y` already holds.
+    pub fn record(&self, gpu: &Gpu, w: &Work, mix: SharedMix, c: &mut Commands) -> R {
         let k = &gpu.kernels;
         let route = w.route();
         let k_used = self.n_used;
@@ -74,7 +99,23 @@ impl VulkanMoe {
                 c,
             )
         })?;
-        k.moe_route(&w.batch, w.moe_logits(), &self.gate, k_used, route, c)?;
+        if let (Some(gate), SharedMix::Gated) = (&self.shared_gate, mix) {
+            let out = Out {
+                stride: 1,
+                offset: 0,
+            };
+            k.gemv_rows(gate, &w.h, w.shexp_gate(), out, Rows::Tokens, &w.batch, c)?;
+        }
+        k.moe_route(
+            &w.batch,
+            w.moe_logits(),
+            &self.gate,
+            &self.bias,
+            self.sigmoid,
+            k_used,
+            route,
+            c,
+        )?;
         c.independent(|c| {
             for (m, offset) in [(&self.gate, 0), (&self.up, self.n_ff)] {
                 let out = Out {
@@ -92,16 +133,22 @@ impl VulkanMoe {
             offset: 0,
         };
         k.moe_gemv(&self.down, act, w.moe_out(), out, 1, route, c)?;
-        k.moe_combine(route, w.moe_out(), &w.y, w.d, k_used, c)
+        k.moe_combine(
+            route,
+            w.moe_out(),
+            &w.y,
+            w.d,
+            k_used,
+            w.shexp_gate(),
+            mix,
+            c,
+        )
     }
 }
 
 impl Gpu {
     /// Copies a routed expert matrix to the device.
-    pub(super) fn experts(
-        &self,
-        e: &crate::blocks::Experts,
-    ) -> Result<DeviceExperts, LoadError> {
+    pub(super) fn experts(&self, e: &crate::blocks::Experts) -> Result<DeviceExperts, LoadError> {
         DeviceExperts::upload(&self.device, e.ty, e.data, e.rows, e.cols, e.count)
             .map_err(super::vulkan_error)
     }

@@ -1,6 +1,7 @@
-// The router of a mixture of experts: softmax over the experts' logits,
-// then the `k` likeliest experts of each token, weighted by their share of
-// those `k` probabilities and written as the slots the grouped GEMV runs.
+// The router of a mixture of experts: a softmax over the experts' logits, or
+// a sigmoid per expert as Qwen3.5 MoE routes, then the `k` likeliest experts
+// of each token, weighted by their share of those `k` probabilities and
+// written as the slots the grouped GEMV runs.
 //
 // One invocation routes one token: the router is a few hundred logits
 // against the width of the block, and the walk over the experts would cost
@@ -9,6 +10,7 @@
 struct Shape {
     experts: u32,
     k: u32,
+    sigmoid: u32,
 }
 
 var<immediate> shape: Shape;
@@ -18,6 +20,9 @@ var<immediate> shape: Shape;
 // The slot count, then the expert each slot runs.
 @group(0) @binding(2) var<storage, read_write> moe: array<u32>;
 @group(0) @binding(3) var<storage, read_write> weights: array<f32>;
+// A sigmoid router's bias per expert, which picks the experts but never
+// weights them; zero for a softmax.
+@group(0) @binding(4) var<storage, read> bias: array<f32>;
 
 const MAX_EXPERTS: u32 = 1024u;
 const MAX_PICKS: u32 = 32u;
@@ -36,22 +41,28 @@ fn main(@builtin(workgroup_id) group: vec3<u32>) {
     let n = min(shape.experts, MAX_EXPERTS);
     let k = min(shape.k, MAX_PICKS);
     let at = row * n;
-    var best = logits[at];
-    for (var e = 1u; e < n; e++) {
-        best = max(best, logits[at + e]);
-    }
-    var total = 0.0;
-    for (var e = 0u; e < n; e++) {
-        let p = exp(logits[at + e] - best);
-        probs[e] = p;
-        total += p;
-    }
-    for (var e = 0u; e < n; e++) {
-        probs[e] = probs[e] / total;
+    if shape.sigmoid == 0u {
+        var best = logits[at];
+        for (var e = 1u; e < n; e++) {
+            best = max(best, logits[at + e]);
+        }
+        var total = 0.0;
+        for (var e = 0u; e < n; e++) {
+            let p = exp(logits[at + e] - best);
+            probs[e] = p;
+            total += p;
+        }
+        for (var e = 0u; e < n; e++) {
+            probs[e] = probs[e] / total;
+        }
+    } else {
+        for (var e = 0u; e < n; e++) {
+            probs[e] = 1.0 / (1.0 + exp(-logits[at + e]));
+        }
     }
 
-    // The k likeliest, largest first; an equal probability keeps the lower
-    // expert, as the reference's sort does.
+    // The k likeliest by probability plus bias, largest first; an equal
+    // score keeps the lower expert, as the reference's sort does.
     var share = 0.0;
     for (var j = 0u; j < k; j++) {
         var pick = 0u;
@@ -61,13 +72,14 @@ fn main(@builtin(workgroup_id) group: vec3<u32>) {
             for (var t = 0u; t < j; t++) {
                 taken = taken || picked[t] == e;
             }
-            if (!taken && probs[e] > top) {
-                top = probs[e];
+            let score = probs[e] + bias[e];
+            if (!taken && score > top) {
+                top = score;
                 pick = e;
             }
         }
         picked[j] = pick;
-        share += top;
+        share += probs[pick];
     }
     share = max(share, FLOOR);
     for (var j = 0u; j < k; j++) {

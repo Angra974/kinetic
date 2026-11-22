@@ -193,10 +193,30 @@ les bénéficiaires NVIDIA ne sont pas concernés par ce journal.
 | G2 | Passe prompt sans noyau many-token pour ces types | `85d29aa` | bit-exact conservé, tests verts | pp512 154,8 → 261,9 t/s ; résidu 4,4× vers P0.2 |
 | G3 | Sampling de llama-server absent : `dynatemp_range/exponent`, `min_keep`, `adaptive_target/decay`, `ignore_eos`, `reasoning_budget_tokens` | non committé | mêmes requêtes rejouées sur les deux serveurs, 22 nov., L3-8B IQ4_XS et Qwen3.5-9B Q4_K_M ; 174 tests unitaires verts (91 modèles + 83 serveur) | champs acceptés des deux côtés ; `ignore_eos` passe de `stop` 4 car. à `length` 167 car. ; budget 8 → 8 tokens de raisonnement contre 200 sans budget |
 | G5 | `qwen3moe` refusé au chargement, experts routés et IQ3_S absents du Vulkan : le 30B A3B retombait sur le CPU | `6141b3b`, `7714f86`, `c729c30` | même fichier chargé sur Vulkan, 1er token identique à la CPU, sorties cohérentes ; passe routée comparée au host sur 3 tokens et 3 types d'experts ; 91 tests modèles + 21 GEMV + 1 MoE verts | le modèle tourne sur GPU : pp512 489 t/s, tg128 55,7 t/s |
+| G6 | `qwen35moe` refusé sur Vulkan (expert partagé, routage sigmoïde) et experts Q4_K/Q6_K sans noyau groupé : le 35B A3B retombait sur le CPU | non committé | 6 tests MoE contre le host (sigmoïde gated/plain, Q4_K, Q6_K) et 34 tests `kinetic-vulkan` verts ; le fichier se charge et génère sur Vulkan | génération 11,9 → 26,8 t/s, prompt 16,5 → 91 t/s |
 | G4 | Prétokenizer `tekken` absent : `helcyon-gpt-4o-v4.5` refusé au chargement | non committé | mêmes ids que `llama-tokenize` sur 26 lignes de contrôle et sur un fichier entier (83 tokens, identiques), 22 nov. ; 28 tests tokenizer verts ; génération Vulkan 77,3 t/s | le modèle se charge et génère |
 
 G1 et G2 ferment une partie de **§4.3 formats** et amorcent **P0.2** ; G3 ferme la
 partie sampling de **P0.1**, pas ses routes ; G4 ferme la partie `tekken` de **P0.5**.
+
+### Mesures de G6 (22 nov. 2026)
+
+`qwen3.8-35b-a3b` Q4_K_M (20,22 Gio) : 31 des 41 couches sur une RX 9070 XT de
+16 Gio, un seul job GPU à la fois, même prompt (« Say hi in five words. ») et
+40 tokens générés à température 0 ; llama.cpp `19bc41dbb`.
+
+| Test | llama-server `-ngl 31` | kinetic `--gpu-layers 31` |
+|---|---:|---:|
+| génération | 39,2-40,7 t/s | 25,2-27,6 t/s |
+| prompt, 18 tokens | 82,2 t/s | 86,2-89,3 t/s |
+
+kinetic sur CPU pour la même requête : 11,9 t/s en génération, 16,5 t/s en
+prompt. Le GPU double le débit de Kinetic et le préfill dépasse llama, mais le
+décodage reste 1,5× sous llama. `--gpu-layers` balayé de 24 à 41 : plateau de
+26 à 27 t/s jusqu'à 34 couches (optimum 27,2 à 34), puis 25,0 à 38 et 24,4 à 41
+où les poids débordent en mémoire hôte. Le décodage ne dépend donc presque pas
+du nombre de couches placées : il est borné par les experts lus en mémoire hôte,
+pas par le calcul GPU.
 
 ### Mesures de G5 (22 nov. 2026)
 

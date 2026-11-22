@@ -1,6 +1,8 @@
 use std::rc::Rc;
 
-use kinetic_vulkan::{Commands, ConvRing, DeltaState, Device, DeviceBuffer, KvCache, Residual};
+use kinetic_vulkan::{
+    Commands, ConvRing, DeltaState, Device, DeviceBuffer, KvCache, Residual, SharedMix,
+};
 
 use super::attention::VulkanAttention;
 use super::delta_net::VulkanDeltaNet;
@@ -45,17 +47,23 @@ impl LayerState {
 }
 
 /// The feed-forward of a layer: a dense one, or the routed experts of a
-/// mixture.
+/// mixture, which a layer may have on top of a dense feed-forward, the
+/// shared expert every token runs.
 enum VulkanFeed {
     Dense(VulkanFfn),
     Moe(VulkanMoe),
+    Shared(VulkanFfn, VulkanMoe),
 }
 
 impl VulkanFeed {
     fn record(&self, gpu: &Gpu, w: &Work, c: &mut Commands) -> R {
         match self {
             VulkanFeed::Dense(f) => f.record(gpu, w, c),
-            VulkanFeed::Moe(m) => m.record(gpu, w, c),
+            VulkanFeed::Moe(m) => m.record(gpu, w, SharedMix::None, c),
+            VulkanFeed::Shared(f, m) => {
+                f.record(gpu, w, c)?;
+                m.record(gpu, w, m.mix(), c)
+            }
         }
     }
 
@@ -63,15 +71,20 @@ impl VulkanFeed {
         match self {
             VulkanFeed::Dense(f) => f.size_bytes(),
             VulkanFeed::Moe(m) => m.size_bytes(),
+            VulkanFeed::Shared(f, m) => f.size_bytes() + m.size_bytes(),
         }
     }
 
-    /// The width of the activations this feed-forward reads.
-    fn n_ff(&self) -> usize {
+    /// The widths of the activations this feed-forward reads: its own, and
+    /// the routed experts' when it has a shared expert too.
+    fn widths(&self) -> impl Iterator<Item = usize> + '_ {
         match self {
-            VulkanFeed::Dense(f) => f.gate.rows(),
-            VulkanFeed::Moe(m) => m.n_ff(),
+            VulkanFeed::Dense(f) => [Some(f.gate.rows()), None],
+            VulkanFeed::Moe(m) => [None, Some(m.n_ff())],
+            VulkanFeed::Shared(f, m) => [Some(f.gate.rows()), Some(m.n_ff())],
         }
+        .into_iter()
+        .flatten()
     }
 }
 
@@ -104,7 +117,9 @@ impl VulkanLayer {
         let ffn = match (&l.ffn, &l.experts) {
             (Some(f), None) => VulkanFeed::Dense(VulkanFfn::upload(gpu, f)?),
             (None, Some(m)) => VulkanFeed::Moe(VulkanMoe::upload(gpu, m)?),
-            (Some(_), Some(_)) => return Err(unsupported("routed experts with a dense feed-forward")),
+            (Some(f), Some(m)) => {
+                VulkanFeed::Shared(VulkanFfn::upload(gpu, f)?, VulkanMoe::upload(gpu, m)?)
+            }
             (None, None) => return Err(unsupported("layers without a feed-forward")),
         };
         Ok(VulkanLayer {
@@ -137,15 +152,16 @@ impl VulkanLayer {
         }
     }
 
-    pub fn n_ff(&self) -> usize {
-        self.ffn.n_ff()
+    /// The widths of the activations the feed-forward reads.
+    pub fn ffn_widths(&self) -> impl Iterator<Item = usize> + '_ {
+        self.ffn.widths()
     }
 
     /// The experts a mixture layer routes over, and how many run per token.
     pub fn moe_shape(&self) -> Option<(usize, usize)> {
         match &self.ffn {
             VulkanFeed::Dense(_) => None,
-            VulkanFeed::Moe(m) => Some(m.shape()),
+            VulkanFeed::Moe(m) | VulkanFeed::Shared(_, m) => Some(m.shape()),
         }
     }
 

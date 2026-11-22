@@ -7,7 +7,7 @@ use half::f16;
 use kinetic_quant::{dequantize, Matrix, TensorType};
 use kinetic_vulkan::{
     Batch, Commands, Device, DeviceBuffer, DeviceExperts, DeviceMatrix, Error, GemvInput, Instance,
-    Kernels, Out, Route, Rows,
+    Kernels, Out, Route, Rows, SharedMix,
 };
 
 struct Gpu {
@@ -55,14 +55,28 @@ impl Lcg {
     }
 }
 
-/// Random blocks of `ty` with sane f16 scales at their usual offset.
+/// Random blocks of `ty` with sane f16 scales at their usual offset: first
+/// in a block, except Q6_K's, which is last; Q4_K and Q5_K keep a small f16
+/// minimum after it.
 fn random_matrix(ty: TensorType, rows: usize, cols: usize, rng: &mut Lcg) -> Vec<u8> {
     let size = ty.block_bytes();
     let blocks = rows * cols / ty.block_len();
     let mut data: Vec<u8> = (0..blocks * size).map(|_| rng.next() as u8).collect();
     for blk in data.chunks_exact_mut(size) {
-        let v = f16::from_f32(0.001 + rng.f32().abs() * 0.01);
-        blk[..2].copy_from_slice(&v.to_le_bytes());
+        // A K-quant scale covers a super-block of 256 values, so its f16 is
+        // a thousandth of the others' to keep the products the same size.
+        let unit = if matches!(ty, TensorType::Q4K | TensorType::Q5K | TensorType::Q6K) {
+            0.001
+        } else {
+            1.0
+        };
+        let at = if ty == TensorType::Q6K { size - 2 } else { 0 };
+        let v = f16::from_f32(unit * (0.001 + rng.f32().abs() * 0.01));
+        blk[at..at + 2].copy_from_slice(&v.to_le_bytes());
+        if matches!(ty, TensorType::Q4K | TensorType::Q5K) {
+            let min = f16::from_f32(0.0005 * unit);
+            blk[2..4].copy_from_slice(&min.to_le_bytes());
+        }
     }
     data
 }
@@ -79,18 +93,28 @@ fn matvec(ty: TensorType, data: &[u8], rows: usize, cols: usize, x: &[f32]) -> V
         .collect()
 }
 
-fn softmax_top(v: &mut [f32], k: usize) -> Vec<(u32, f32)> {
-    let max = v.iter().copied().fold(f32::MIN, f32::max);
-    let mut sum = 0.0;
-    for p in v.iter_mut() {
-        *p = (*p - max).exp();
-        sum += *p;
+/// The `k` experts `v` picks, largest first, weighted by their share of the
+/// `k` probabilities, as the host's gating does: a softmax, or a sigmoid per
+/// expert when `sigmoid` says so, chosen by probability plus `bias`.
+fn picks(v: &mut [f32], bias: &[f32], sigmoid: bool, k: usize) -> Vec<(u32, f32)> {
+    if sigmoid {
+        for p in v.iter_mut() {
+            *p = 1.0 / (1.0 + (-*p).exp());
+        }
+    } else {
+        let max = v.iter().copied().fold(f32::MIN, f32::max);
+        let mut sum = 0.0;
+        for p in v.iter_mut() {
+            *p = (*p - max).exp();
+            sum += *p;
+        }
+        for p in v.iter_mut() {
+            *p /= sum;
+        }
     }
-    for p in v.iter_mut() {
-        *p /= sum;
-    }
+    let score = |e: u32| v[e as usize] + bias[e as usize];
     let mut order: Vec<u32> = (0..v.len() as u32).collect();
-    order.sort_by(|&a, &b| v[b as usize].total_cmp(&v[a as usize]).then(a.cmp(&b)));
+    order.sort_by(|&a, &b| score(b).total_cmp(&score(a)).then(a.cmp(&b)));
     order.truncate(k);
     let share: f32 = order.iter().map(|&e| v[e as usize]).sum();
     order
@@ -99,7 +123,7 @@ fn softmax_top(v: &mut [f32], k: usize) -> Vec<(u32, f32)> {
         .collect()
 }
 
-fn check(ty: TensorType) {
+fn check(ty: TensorType, sigmoid: bool, mix: SharedMix) {
     for gpu in gpus() {
         let mut rng = Lcg(ty as u64 + 3);
         let (rows, cols, count, k, tokens) = (256, 2 * 256, 4, 2, 3);
@@ -114,6 +138,11 @@ fn check(ty: TensorType) {
             .collect();
         let router: Vec<f32> = (0..count * cols).map(|_| rng.f32()).collect();
         let x: Vec<f32> = (0..tokens * cols).map(|_| rng.f32() * 3.0).collect();
+        let bias: Vec<f32> = (0..count)
+            .map(|_| if sigmoid { rng.f32() * 0.5 } else { 0.0 })
+            .collect();
+        let shexp_gate: Vec<f32> = (0..cols).map(|_| rng.f32()).collect();
+        let shared: Vec<f32> = (0..tokens * cols).map(|_| rng.f32()).collect();
 
         let dev = &gpu.device;
         let kernels = &gpu.kernels;
@@ -128,7 +157,14 @@ fn check(ty: TensorType) {
         let up_d = DeviceExperts::upload(dev, ty, &flat(&up), rows, cols, count).unwrap();
         let down_d = DeviceExperts::upload(dev, ty, &flat(&down), cols, rows, count).unwrap();
         let logits = DeviceBuffer::new(dev, tokens * count).unwrap();
-        let y = DeviceBuffer::new(dev, tokens * cols).unwrap();
+        let bias_d = DeviceBuffer::from_slice(dev, &bias).unwrap();
+        let shexp = DeviceMatrix::upload(
+            dev,
+            &Matrix::new(TensorType::F32, bytemuck(&shexp_gate), 1, cols),
+        )
+        .unwrap();
+        let shexp_d = DeviceBuffer::new(dev, tokens).unwrap();
+        let y = DeviceBuffer::from_slice(dev, &shared).unwrap();
         let gu = DeviceBuffer::new(dev, tokens * k * 2 * rows).unwrap();
         let out = DeviceBuffer::new(dev, tokens * k * cols).unwrap();
         let mut act = GemvInput::batch(dev, rows, tokens * k).unwrap();
@@ -140,9 +176,38 @@ fn check(ty: TensorType) {
         let mut c = Commands::new(dev).unwrap();
         batch.record_upload(&mut c).unwrap();
         input.upload(kernels, &x, &mut c).unwrap();
-        kernels.gemv_rows(&router, &input, &logits, Out { stride: count, offset: 0 }, Rows::Tokens, &batch, &mut c).unwrap();
         kernels
-            .moe_route(&batch, &logits, &gate_d, k, &route, &mut c)
+            .gemv_rows(
+                &router,
+                &input,
+                &logits,
+                Out {
+                    stride: count,
+                    offset: 0,
+                },
+                Rows::Tokens,
+                &batch,
+                &mut c,
+            )
+            .unwrap();
+        kernels
+            .gemv_rows(
+                &shexp,
+                &input,
+                &shexp_d,
+                Out {
+                    stride: 1,
+                    offset: 0,
+                },
+                Rows::Tokens,
+                &batch,
+                &mut c,
+            )
+            .unwrap();
+        kernels
+            .moe_route(
+                &batch, &logits, &gate_d, &bias_d, sigmoid, k, &route, &mut c,
+            )
             .unwrap();
         for (m, offset) in [(&gate_d, 0), (&up_d, rows)] {
             let o = Out {
@@ -171,7 +236,7 @@ fn check(ty: TensorType) {
             )
             .unwrap();
         kernels
-            .moe_combine(&route, &out, &y, cols, k, &mut c)
+            .moe_combine(&route, &out, &y, cols, k, &shexp_d, mix, &mut c)
             .unwrap();
         c.submit().unwrap();
 
@@ -189,10 +254,21 @@ fn check(ty: TensorType) {
             .enumerate()
             .map(|(i, &q)| q as f32 * act_d[2 * (i / 32)])
             .collect();
-        let mut expected = vec![0.0; tokens * cols];
+        let mut expected = match mix {
+            SharedMix::None => vec![0.0; tokens * cols],
+            _ => shared.clone(),
+        };
         for t in 0..tokens {
-            let mut probs = matvec(TensorType::F32, router_bytes, count, cols, &x[t * cols..(t + 1) * cols]);
-            let picks = softmax_top(&mut probs, k);
+            let row = &x[t * cols..(t + 1) * cols];
+            if mix == SharedMix::Gated {
+                let logit: f32 = shexp_gate.iter().zip(row).map(|(a, b)| a * b).sum();
+                let scale = 1.0 / (1.0 + (-logit).exp());
+                expected[t * cols..][..cols]
+                    .iter_mut()
+                    .for_each(|v| *v *= scale);
+            }
+            let mut probs = matvec(TensorType::F32, router_bytes, count, cols, row);
+            let picks = picks(&mut probs, &bias, sigmoid, k);
             for (j, (expert, weight)) in picks.iter().enumerate() {
                 let slot = t * k + j;
                 let e = *expert as usize;
@@ -206,7 +282,13 @@ fn check(ty: TensorType) {
                     "slot {slot}: weight {} against {weight}",
                     host_weights[slot]
                 );
-                let d = matvec(ty, &down[e], cols, rows, &act_x[slot * rows..(slot + 1) * rows]);
+                let d = matvec(
+                    ty,
+                    &down[e],
+                    cols,
+                    rows,
+                    &act_x[slot * rows..(slot + 1) * rows],
+                );
                 let out = &mut expected[t * cols..(t + 1) * cols];
                 for (o, d) in out.iter_mut().zip(d) {
                     *o += weight * d;
@@ -245,5 +327,30 @@ fn quantized(input: &GemvInput) -> Vec<f32> {
 
 #[test]
 fn routed_feed_forward_matches_the_host() {
-    check(TensorType::IQ3XXS);
+    check(TensorType::IQ3XXS, false, SharedMix::None);
+}
+
+#[test]
+fn sigmoid_routing_scales_the_shared_expert() {
+    check(TensorType::IQ3XXS, true, SharedMix::Gated);
+}
+
+#[test]
+fn sigmoid_routing_adds_an_ungated_shared_expert() {
+    check(TensorType::IQ3XXS, true, SharedMix::Plain);
+}
+
+#[test]
+fn routed_q4_k_experts_match_the_host() {
+    check(TensorType::Q4K, false, SharedMix::None);
+}
+
+#[test]
+fn sigmoid_routing_scales_q4_k_experts() {
+    check(TensorType::Q4K, true, SharedMix::Gated);
+}
+
+#[test]
+fn routed_q6_k_experts_match_the_host() {
+    check(TensorType::Q6K, false, SharedMix::None);
 }
