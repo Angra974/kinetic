@@ -377,6 +377,47 @@ seule façon de charger un modèle plus gros que la VRAM ; ici elle n'est pas
 nécessaire, et deux fois plus lente (21 contre 33,5 t/s). Conclusion inchangée :
 opt-in, non mesurable comme sauvetage sur cette machine.
 
+### Profil d'une couche CPU du 35B (22 nov. 2026)
+
+Le coût qui condamne la découpe, mesuré et situé. Timers temporaires dans
+`Moe::forward` et `run_experts`, RAD-1 coupé (`--off rad1`) pour ne profiler que
+des passes d'une ligne, lecture des experts après trois tokens pour écarter les
+défauts de page :
+
+| Partie | ms par token (40 couches) | Mo par couche | Débit |
+|---|---:|---:|---:|
+| routeur | 4,5-10,2 | 0,15 | ~1 GB/s |
+| gate + up | 14,9-17,5 | 9,4 | 22-25 GB/s |
+| down | 41,7-50,1 | 5,8 | 4,6-5,6 GB/s |
+| silu, quantifications, mélange | 0,35 | — | — |
+| **total MoE** | **64-79** | | |
+
+Un token coûte 102 ms (`9,8 t/s`, glouton, sans brouillon) : le MoE en prend 64
+a 79, soit 63 à 77 %, dont les deux tiers dans `down` seul.
+
+La cause n'est pas le nombre de tâches — `ROWS_PER_TASK` passé de 64 à 256 ne
+gagne rien (down 46,5 → 43,7 ms) — mais le coût par **ligne de sortie** :
+6144 points de 2048 poids (gate+up) coûtent 65 ns chacun, 16 384 points de 768
+poids (down) 71 ns chacun. Le prix d'une ligne ne dépend presque pas de sa
+longueur, donc les 2048 lignes courtes de `down` payent 5,6 fois plus par poids
+que les 768 lignes longues de `gate+up`. llama.cpp traite ces deux projections
+avec un noyau qui bloque plusieurs lignes par dépassage du poids, d'où son coût
+qui reste proportionnel aux octets lus.
+
+Face à llama.cpp sur la même machine, même fichier, CPU seul, glouton :
+`llama-bench -ngl 0 -n 128` donne 15,15 t/s, soit 66 ms par token et 1,65 ms par
+couche, contre 9,8 t/s, 102 ms et 2,55 ms par couche pour Kinetic. L'écart est
+de 0,9 ms par couche, et le profil le place dans `down` (1,1 ms contre ~0,3 ms
+pour les 5,8 Mo à 20 GB/s). Le chiffre de ~0,8 ms par couche CPU attribué à
+llama ne se retrouve pas ici : mesuré en CPU seul, llama coûte 1,65 ms par
+couche, attention comprise ; les 0,8 ms venaient d'une décomposition des runs
+GPU découpés, qui mêlent calcul CPU et attente du périphérique.
+
+Le 4,3 ms par couche hôte de la découpe est d'ailleurs supérieur aux 2,55 ms
+du profil : la découpe ajoute l'aller-retour entre les couches GPU et hôte
+(59,4 ms par token à 31/40 contre 32,4 ms tout GPU, soit 3,0 ms par couche
+hôte).
+
 ### Mesures de G5 (22 nov. 2026)
 
 `qwen3-coder-30b-a3b-instruct` UD-IQ3_XXS (11,97 Gio), un seul job GPU à la fois,
