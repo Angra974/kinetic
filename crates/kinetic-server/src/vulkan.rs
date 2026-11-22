@@ -49,10 +49,22 @@ fn vulkan_error(e: kinetic_vulkan::Error) -> LoadError {
 
 impl<'a> VulkanBackend<'a> {
     /// Uploads `model` to the first Vulkan device that can run it, for
-    /// sequences of up to `context` tokens. Fails when no device is usable
-    /// or the model needs something the Vulkan kernels lack.
+    /// sequences of up to `context` tokens, as many layers as fit there.
+    /// Fails when no device is usable or the model needs something the
+    /// Vulkan kernels lack.
     pub fn new(model: &'a Model<'a>, context: usize) -> Result<Self, LoadError> {
-        let gpu = VulkanModel::load(model, context)?;
+        VulkanBackend::with_gpu_layers(model, context, None)
+    }
+
+    /// [`VulkanBackend::new`] with its last `gpu_layers` layers on the
+    /// device, as llama.cpp's `-ngl` counts them; the layers before them
+    /// run on the host, and `None` takes as many as fit.
+    pub fn with_gpu_layers(
+        model: &'a Model<'a>,
+        context: usize,
+        gpu_layers: Option<usize>,
+    ) -> Result<Self, LoadError> {
+        let gpu = VulkanModel::load_on(model, context, gpu_layers)?;
         let state = gpu.new_state().map_err(vulkan_error)?;
         // the drafter's cache shares the memory, so a full device fails here
         // and not on the first request
@@ -98,6 +110,11 @@ impl<'a> VulkanBackend<'a> {
     /// Vulkan.
     pub fn device(&self) -> &str {
         &self.device
+    }
+
+    /// Layers that run on the CPU, before the device's.
+    pub fn host_layers(&self) -> usize {
+        self.gpu.host_layers()
     }
 
     /// The cached sequence when `prompt` extends it, else a new one, run up

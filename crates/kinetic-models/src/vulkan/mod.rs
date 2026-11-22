@@ -37,6 +37,7 @@ use kinetic_vulkan::{
     PhysicalDevice, Rows,
 };
 
+use crate::blocks::MixerState;
 use crate::model::{embed_into, Mark};
 use crate::{Forward, LoadError, Model};
 use layer::{LayerState, VulkanLayer};
@@ -115,6 +116,12 @@ pub fn devices() -> kinetic_vulkan::Result<Vec<PhysicalDevice>> {
 pub struct VulkanModel<'m> {
     gpu: Gpu,
     name: String,
+    /// The model uploaded, whose first `front` layers run on the host.
+    host: &'m Model<'m>,
+    /// Layers that run on the host, before the device's: the weights too
+    /// large for the VRAM, read by the CPU at the speed of its memory
+    /// rather than over the bus.
+    front: usize,
     /// Most tokens a state holds.
     context: usize,
     n_embd: usize,
@@ -136,6 +143,8 @@ pub struct VulkanModel<'m> {
 pub struct VulkanState {
     pos: usize,
     checkpoint: Option<usize>,
+    /// The state of the layers that run on the host.
+    front: Vec<MixerState>,
     work: Work,
     /// The buffers of a prompt pass, if it runs more tokens than any
     /// other: a pass costs a little by the rows its buffers hold, which
@@ -182,23 +191,78 @@ struct Output {
     logits: Vec<f32>,
 }
 
+/// Uploads `model`'s last `gpu_layers` layers, as llama.cpp's `-ngl` counts
+/// them, and every layer when `None`: a model larger than the VRAM spills
+/// what it cannot hold into the system's memory and reads it over the bus,
+/// which measurably beats running those layers on the CPU here. Returns how
+/// many layers stay on the host, and those on the device after them.
+fn upload_layers<'a>(
+    model: &Model<'a>,
+    gpu: &Gpu,
+    gpu_layers: Option<usize>,
+    ropes: &mut RopeTables,
+) -> Result<(usize, Vec<VulkanLayer>), LoadError> {
+    let n = model.layers.len();
+    let want = gpu_layers.unwrap_or(n).min(n);
+    match want {
+        0 => {
+            return Err(LoadError(
+                "no layer on the device: --gpu-layers 0 runs on the CPU (--device cpu)".into(),
+            ))
+        }
+        // The layers after the split run on the device.
+        _ => {}
+    }
+    let kept = model.layers[n - want..]
+        .iter()
+        .map(|l| VulkanLayer::upload(gpu, l, ropes))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((n - want, kept))
+}
+
 impl<'m> VulkanModel<'m> {
+    /// Layers that run on the host, before the device's.
+    pub fn host_layers(&self) -> usize {
+        self.front
+    }
+
+    /// Fresh host states for those layers.
+    fn new_front(&self) -> Vec<MixerState> {
+        self.host.layers[..self.front]
+            .iter()
+            .map(|l| l.mixer.new_state())
+            .collect()
+    }
+
     /// Uploads `model` to the first Vulkan device that can run it, for
-    /// sequences of up to `context` tokens.
-    pub fn load(model: &Model<'m>, context: usize) -> Result<VulkanModel<'m>, LoadError> {
+    /// sequences of up to `context` tokens, as many layers as fit there.
+    pub fn load(model: &'m Model<'m>, context: usize) -> Result<VulkanModel<'m>, LoadError> {
+        VulkanModel::load_on(model, context, None)
+    }
+
+    /// Uploads `model` to the first Vulkan device that can run it, for
+    /// sequences of up to `context` tokens: its last `gpu_layers` layers,
+    /// as llama.cpp's `-ngl` counts them, and as many as fit when `None`.
+    /// The layers before them run on the host.
+    pub fn load_on(
+        model: &'m Model<'m>,
+        context: usize,
+        gpu_layers: Option<usize>,
+    ) -> Result<VulkanModel<'m>, LoadError> {
         let physical = devices()
             .map_err(vulkan_error)?
             .into_iter()
             .next()
             .ok_or_else(|| LoadError("no Vulkan device can run models".into()))?;
-        VulkanModel::load_on(model, context, &physical)
+        VulkanModel::load_on_device(model, context, &physical, gpu_layers)
     }
 
-    /// Uploads `model` to `physical` for sequences of up to `context` tokens.
-    pub fn load_on(
-        model: &Model<'m>,
+    /// [`VulkanModel::load_on`] on `physical`.
+    pub fn load_on_device(
+        model: &'m Model<'m>,
         context: usize,
         physical: &PhysicalDevice,
+        gpu_layers: Option<usize>,
     ) -> Result<VulkanModel<'m>, LoadError> {
         if model.folded {
             return Err(LoadError(
@@ -223,20 +287,21 @@ impl<'m> VulkanModel<'m> {
         // takes its room before them.
         let output = gpu.matrix(&model.output)?;
         let output_norm = gpu.vector(&model.output_norm)?;
-        let mut layers = model
-            .layers
-            .iter()
-            .map(|l| VulkanLayer::upload(&gpu, l, &mut ropes))
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut mtp = model
-            .mtp
-            .as_ref()
-            .map(|m| VulkanMtp::upload(&gpu, m, &mut ropes))
-            .transpose()?;
+        let (front, layers) = upload_layers(model, &gpu, gpu_layers, &mut ropes)?;
+        // A draft block only helps when every layer runs on the device.
+        let mut mtp = match front {
+            0 => model
+                .mtp
+                .as_ref()
+                .map(|m| VulkanMtp::upload(&gpu, m, &mut ropes))
+                .transpose()?,
+            _ => None,
+        };
         // The routed experts go in last: a model larger than the VRAM keeps
         // the weights every token reads and spills the one expert in `n`
         // that a token does.
-        for (layer, l) in layers.iter_mut().zip(&model.layers) {
+        let mut layers = layers;
+        for (layer, l) in layers.iter_mut().zip(&model.layers[front..]) {
             layer.upload_experts(&gpu, l)?;
         }
         if let Some((m, mtp)) = model.mtp.as_ref().zip(mtp.as_mut()) {
@@ -244,6 +309,8 @@ impl<'m> VulkanModel<'m> {
         }
         Ok(VulkanModel {
             name: physical.info().name.clone(),
+            host: model,
+            front,
             context,
             n_embd: model.n_embd,
             eps: model.eps,
@@ -309,6 +376,7 @@ impl<'m> VulkanModel<'m> {
         Ok(VulkanState {
             pos: 0,
             checkpoint: None,
+            front: self.new_front(),
             step: self.record(&work, &layers, false, false)?,
             step_logits: self.record(&work, &layers, true, false)?,
             step_prompt: self.record(
@@ -337,6 +405,7 @@ impl<'m> VulkanModel<'m> {
         state.pos = 0;
         state.checkpoint = None;
         state.marks.clear();
+        state.front = self.new_front();
         for (layer, s) in self.layers.iter().zip(&mut state.layers) {
             layer.clear(s)?;
         }
@@ -470,6 +539,7 @@ impl<'m> VulkanModel<'m> {
             self.rollback(state, state.pos - start)?;
         }
         state.checkpoint = Some(state.pos);
+        state.front.iter_mut().for_each(MixerState::checkpoint);
         Ok(())
     }
 
@@ -487,6 +557,11 @@ impl<'m> VulkanModel<'m> {
         if let Some(replay) = state.replay.as_ref().filter(|_| keep > 0) {
             state.work.batch.set_replay(start, start + keep)?;
             replay.launch()?;
+        }
+        let rows: Vec<usize> = (0..keep).collect();
+        let host = &self.host.layers[..self.front];
+        for (layer, s) in host.iter().zip(&mut state.front) {
+            layer.mixer.rollback(s, &rows);
         }
         state.pos = start + keep;
         Ok(())
@@ -556,7 +631,19 @@ impl<'m> VulkanModel<'m> {
             w.batch.set(n, state.pos, head.clone(), state.checkpoint)?;
             self.ropes.fill(&mut w.batch, state.pos, n);
             let x = &mut w.embedded.as_mut_slice()[..n * d];
-            embed_into(&self.embd, self.embd_scale, chunk, x);
+            match self.front {
+                0 => embed_into(&self.embd, self.embd_scale, chunk, x),
+                // The host layers leave the stream the device's first layer
+                // normalizes, so only `n_embd` values per token cross over.
+                _ => {
+                    let mut hidden = self.host.embed(chunk);
+                    let host = &self.host.layers[..self.front];
+                    for (layer, s) in host.iter().zip(&mut state.front) {
+                        layer.forward(&mut hidden, self.eps, state.pos, None, None, s);
+                    }
+                    x.copy_from_slice(&hidden);
+                }
+            }
             let one = logits && head.len() == 1;
             match (one, prompt) {
                 (true, true) => state.step_prompt_logits.launch()?,

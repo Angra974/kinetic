@@ -148,6 +148,10 @@ enum Command {
         /// embeddings and the output head [default: 0]
         #[arg(long, value_name = "LIST", value_delimiter = ',')]
         gpus: Vec<usize>,
+        /// Most layers on the GPU, the rest on the CPU [default: as many as
+        /// fit]
+        #[arg(long, value_name = "N")]
+        gpu_layers: Option<usize>,
         /// Also run llama.cpp's llama-bench on the same file with the same
         /// settings and print a card comparing both [default: llama-bench
         /// on PATH or in a usual install folder]
@@ -689,6 +693,7 @@ fn run(cli: Cli) -> Result<()> {
             threads,
             device,
             gpus,
+            gpu_layers,
             compare,
             depth,
             prompt,
@@ -698,6 +703,9 @@ fn run(cli: Cli) -> Result<()> {
             if let Some(llama_bench) = compare {
                 if !off.off.is_empty() {
                     return Err("--off does not apply to --compare".into());
+                }
+                if gpu_layers.is_some() {
+                    return Err("--gpu-layers does not apply to --compare".into());
                 }
                 let settings = compare::Settings {
                     device,
@@ -717,6 +725,7 @@ fn run(cli: Cli) -> Result<()> {
                 &model.name,
                 device,
                 &gpus,
+                gpu_layers,
                 tests,
                 &off.off,
                 json,
@@ -1058,20 +1067,27 @@ fn vulkan_backend<'a>(
     runtime: &RuntimeArgs,
     context: usize,
 ) -> Option<std::result::Result<Placed<'a>, kinetic_models::LoadError>> {
-    Some(
-        kinetic_server::VulkanBackend::new(model, context).map(|gpu| {
+    let placed = kinetic_server::VulkanBackend::with_gpu_layers(model, context, runtime.gpu_layers)
+        .map(|gpu| {
             let gpu = match runtime.is_off(Tech::Rad1) {
                 true => gpu.without_drafts(),
                 false => gpu,
             };
+            if gpu.host_layers() > 0 {
+                eprintln!(
+                    "kinetic: {} of {} layers run on the GPU and the rest on the CPU",
+                    model.n_layers() - gpu.host_layers(),
+                    model.n_layers()
+                );
+            }
             let name = gpu.device().to_owned();
             let gpu = match warm_cache(model, path, runtime, Some("vulkan")) {
                 Some(w) => gpu.with_warm(w),
                 None => gpu,
             };
             (vec![Box::new(gpu) as Box<dyn Backend>], name)
-        }),
-    )
+        });
+    Some(placed)
 }
 
 #[cfg(not(feature = "vulkan"))]

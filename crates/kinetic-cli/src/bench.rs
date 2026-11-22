@@ -84,6 +84,7 @@ pub fn run(
     name: &str,
     device: Device,
     gpus: &[usize],
+    gpu_layers: Option<usize>,
     tests: Tests,
     off: &[Tech],
     as_json: bool,
@@ -103,7 +104,9 @@ pub fn run(
     // The backend's name and the device's.
     let context = CONTEXT + tests.depth;
     let eager = off.contains(&Tech::Torque);
-    let picked = gpu::pick(device, |kind| plain(&model, kind, context, eager, gpus))?;
+    let picked = gpu::pick(device, |kind| {
+        plain(&model, kind, context, eager, gpus, gpu_layers)
+    })?;
     let kind = picked.as_ref().map_or(Device::Cpu, |&(_, k)| k);
     let (backend, on, speeds) = match picked.map(|(p, _)| p) {
         #[cfg(feature = "cuda")]
@@ -125,7 +128,8 @@ pub fn run(
         Some(Plain::Vulkan(plain)) => {
             let on = plain.device().to_owned();
             let drafting = || {
-                let gpu = kinetic_server::VulkanBackend::new(&model, context)?;
+                let gpu =
+                    kinetic_server::VulkanBackend::with_gpu_layers(&model, context, gpu_layers)?;
                 Ok(if rad1 { gpu } else { gpu.without_drafts() })
             };
             let speeds = measure(*plain, drafting, &model, &edit, tests)?;
@@ -247,6 +251,7 @@ fn plain<'a>(
     context: usize,
     #[cfg_attr(not(feature = "cuda"), allow(unused_variables))] eager: bool,
     #[cfg_attr(not(feature = "cuda"), allow(unused_variables))] gpus: &[usize],
+    gpu_layers: Option<usize>,
 ) -> Option<std::result::Result<Plain<'a>, LoadError>> {
     match kind {
         #[cfg(feature = "cuda")]
@@ -254,6 +259,7 @@ fn plain<'a>(
             let placement = kinetic_models::cuda::Placement {
                 eager,
                 devices: gpus.to_vec(),
+                gpu_layers,
                 ..Default::default()
             };
             Some(
@@ -263,8 +269,8 @@ fn plain<'a>(
         }
         #[cfg(feature = "vulkan")]
         Device::Vulkan => Some(
-            kinetic_server::VulkanBackend::plain(model, context)
-                .map(|b| Plain::Vulkan(Box::new(b))),
+            kinetic_server::VulkanBackend::with_gpu_layers(model, context, gpu_layers)
+                .map(|b| Plain::Vulkan(Box::new(b.without_drafts()))),
         ),
         _ => None,
     }

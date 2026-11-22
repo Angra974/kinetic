@@ -91,6 +91,7 @@ impl Allocation {
                         device.add_host_bytes(needs.size);
                         alloc.host = Some(needs.size);
                     }
+
                     // SAFETY: fresh memory of the required size and type.
                     unsafe { raw.bind_buffer_memory(buffer, memory, 0) }
                         .check("vkBindBufferMemory")?;
@@ -120,6 +121,7 @@ impl Drop for Allocation {
         if let Some(bytes) = self.host {
             self.device.sub_host_bytes(bytes);
         }
+
         // SAFETY: work using the buffer was waited for by whoever submitted it.
         unsafe {
             self.device.raw.destroy_buffer(self.buffer, None);

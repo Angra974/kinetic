@@ -234,6 +234,7 @@ kinetic bench model.gguf --device cpu -t 6 -r 5 --json
 | `-t`, `--threads <N>` | CPU threads [default: all] |
 | `--device <auto\|cpu\|cuda>` | the device to measure [default: auto] |
 | `--gpus <LIST>` | CUDA GPUs to spread the layers over, as for `run` |
+| `--gpu-layers <N>` | most layers on the GPU, the rest on the CPU, as for `run` [default: as many as fit] |
 | `--json` | print the results as one JSON object |
 | `--compare [LLAMA_BENCH]` | also run llama.cpp on the same file and print a card with both; see [bench --compare](#bench---compare) |
 | `--off <LIST>` | turn speed technologies off, as for `run`; bench measures RAD-1 (`edit256`), Shortlist and Torque |

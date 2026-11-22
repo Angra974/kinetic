@@ -88,7 +88,12 @@ impl VulkanModel<'_> {
         assert!(state.checkpoint.is_none(), "host copy inside a checkpoint");
         let mut host = model.new_state();
         host.pos = state.pos;
-        let layers = self.layers.iter().zip(&state.layers).zip(&mut host.layers);
+        host.layers[..self.host_layers()].clone_from_slice(&state.front);
+        let layers = self
+            .layers
+            .iter()
+            .zip(&state.layers)
+            .zip(&mut host.layers[self.host_layers()..]);
         for ((layer, s), hs) in layers {
             for (dst, src) in hs.buffers_mut().into_iter().zip(layer.save(s, state.pos)?) {
                 *dst = src;
@@ -111,7 +116,12 @@ impl VulkanModel<'_> {
     pub fn load_state(&self, dev: &mut VulkanState, state: &State) -> R<()> {
         dev.pos = state.pos;
         dev.checkpoint = None;
-        let layers = self.layers.iter().zip(&mut dev.layers).zip(&state.layers);
+        dev.front = state.layers[..self.host_layers()].to_vec();
+        let layers = self
+            .layers
+            .iter()
+            .zip(&mut dev.layers)
+            .zip(&state.layers[self.host_layers()..]);
         for ((layer, s), hs) in layers {
             layer.load(s, state.pos, &hs.buffers())?;
         }
@@ -126,7 +136,11 @@ impl VulkanModel<'_> {
             return Ok(());
         }
         let mut layers = Vec::with_capacity(self.layers.len());
-        let all = self.layers.iter().zip(&state.layers).zip(&model.layers);
+        let all = self
+            .layers
+            .iter()
+            .zip(&state.layers)
+            .zip(&model.layers[self.host_layers()..]);
         for ((layer, s), host) in all {
             layers.push(match host.mixer.needs_mark() {
                 true => {
