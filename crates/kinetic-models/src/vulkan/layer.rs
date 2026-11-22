@@ -75,6 +75,17 @@ impl VulkanFeed {
         }
     }
 
+    /// Uploads the routed experts of the mixture this feed-forward runs.
+    fn upload_experts(&mut self, gpu: &Gpu, l: &Layer) -> Result<(), LoadError> {
+        match (&mut *self, &l.experts) {
+            (VulkanFeed::Moe(m), Some(experts)) | (VulkanFeed::Shared(_, m), Some(experts)) => {
+                m.upload_experts(gpu, experts)
+            }
+            (VulkanFeed::Dense(_), None) => Ok(()),
+            _ => unreachable!("a feed-forward has the experts it was uploaded with"),
+        }
+    }
+
     /// The widths of the activations this feed-forward reads: its own, and
     /// the routed experts' when it has a shared expert too.
     fn widths(&self) -> impl Iterator<Item = usize> + '_ {
@@ -150,6 +161,12 @@ impl VulkanLayer {
             VulkanMixer::ShortConv(s) => s.needs(),
             VulkanMixer::DeltaNet(d) => d.needs(),
         }
+    }
+
+    /// Uploads this layer's routed experts, once the dense weights of every
+    /// layer have their room; see [`VulkanFeed::upload_experts`].
+    pub fn upload_experts(&mut self, gpu: &Gpu, l: &Layer) -> Result<(), LoadError> {
+        self.ffn.upload_experts(gpu, l)
     }
 
     /// The widths of the activations the feed-forward reads.

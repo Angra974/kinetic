@@ -1,5 +1,9 @@
+use std::rc::Rc;
+
 use kinetic_quant::{Matrix, TensorType};
-use kinetic_vulkan::{Commands, DeviceBuffer, DeviceExperts, DeviceMatrix, Out, Rows, SharedMix};
+use kinetic_vulkan::{
+    Commands, Device, DeviceBuffer, DeviceExperts, DeviceMatrix, Out, Rows, SharedMix,
+};
 
 use super::layer::R;
 use super::work::Work;
@@ -12,9 +16,12 @@ use crate::LoadError;
 pub(super) struct VulkanMoe {
     /// One row of logits per expert.
     router: DeviceMatrix,
-    gate: DeviceExperts,
-    up: DeviceExperts,
-    down: DeviceExperts,
+    /// The routed experts, empty until [`VulkanMoe::upload_experts`] fills
+    /// them: a model larger than the VRAM spills whatever it uploaded last,
+    /// and one expert in `n_experts` is read per token.
+    gate: Option<DeviceExperts>,
+    up: Option<DeviceExperts>,
+    down: Option<DeviceExperts>,
     /// The shared expert's gate as a single row, dotted with the block's
     /// input to scale that expert's output.
     shared_gate: Option<DeviceMatrix>,
@@ -29,6 +36,8 @@ pub(super) struct VulkanMoe {
 }
 
 impl VulkanMoe {
+    /// Uploads what a mixture routes with, leaving the experts' room to
+    /// [`VulkanMoe::upload_experts`].
     pub fn upload(gpu: &Gpu, m: &Moe) -> Result<Self, LoadError> {
         let (bias, sigmoid) = match &m.gating {
             // The router reads a bias per expert either way.
@@ -44,9 +53,9 @@ impl VulkanMoe {
         };
         Ok(VulkanMoe {
             router: gpu.matrix(&m.router)?,
-            gate: gpu.experts(&m.gate)?,
-            up: gpu.experts(&m.up)?,
-            down: gpu.experts(&m.down)?,
+            gate: None,
+            up: None,
+            down: None,
             shared_gate,
             bias,
             sigmoid,
@@ -64,8 +73,19 @@ impl VulkanMoe {
         }
     }
 
+    /// Uploads the routed experts, once every layer's dense weights have
+    /// taken their room: they take the VRAM left, and the system's memory
+    /// holds the rest of a model too large for the device.
+    pub fn upload_experts(&mut self, gpu: &Gpu, m: &Moe) -> Result<(), LoadError> {
+        self.gate = Some(experts(&gpu.device, &m.gate)?);
+        self.up = Some(experts(&gpu.device, &m.up)?);
+        self.down = Some(experts(&gpu.device, &m.down)?);
+        Ok(())
+    }
+
     pub fn size_bytes(&self) -> usize {
-        self.gate.size_bytes() + self.up.size_bytes() + self.down.size_bytes() + 4 * self.bias.len()
+        let bytes = |e: &Option<DeviceExperts>| e.as_ref().map_or(0, DeviceExperts::size_bytes);
+        bytes(&self.gate) + bytes(&self.up) + bytes(&self.down) + 4 * self.bias.len()
     }
 
     /// The experts it routes over, and how many run per token.
@@ -85,6 +105,10 @@ impl VulkanMoe {
         let k = &gpu.kernels;
         let route = w.route();
         let k_used = self.n_used;
+        // [`VulkanModel::load`] fills them before any pass runs.
+        let gate = self.gate.as_ref().expect("experts uploaded at load");
+        let up = self.up.as_ref().expect("experts uploaded at load");
+        let down = self.down.as_ref().expect("experts uploaded at load");
         c.independent(|c| {
             k.gemv_rows(
                 &self.router,
@@ -109,7 +133,7 @@ impl VulkanMoe {
         k.moe_route(
             &w.batch,
             w.moe_logits(),
-            &self.gate,
+            gate,
             &self.bias,
             self.sigmoid,
             k_used,
@@ -117,7 +141,7 @@ impl VulkanMoe {
             c,
         )?;
         c.independent(|c| {
-            for (m, offset) in [(&self.gate, 0), (&self.up, self.n_ff)] {
+            for (m, offset) in [(gate, 0), (up, self.n_ff)] {
                 let out = Out {
                     stride: 2 * self.n_ff,
                     offset,
@@ -132,7 +156,7 @@ impl VulkanMoe {
             stride: w.d,
             offset: 0,
         };
-        k.moe_gemv(&self.down, act, w.moe_out(), out, 1, route, c)?;
+        k.moe_gemv(down, act, w.moe_out(), out, 1, route, c)?;
         k.moe_combine(
             route,
             w.moe_out(),
@@ -146,10 +170,8 @@ impl VulkanMoe {
     }
 }
 
-impl Gpu {
-    /// Copies a routed expert matrix to the device.
-    pub(super) fn experts(&self, e: &crate::blocks::Experts) -> Result<DeviceExperts, LoadError> {
-        DeviceExperts::upload(&self.device, e.ty, e.data, e.rows, e.cols, e.count)
-            .map_err(super::vulkan_error)
-    }
+/// Copies a routed expert matrix to the device.
+fn experts(device: &Rc<Device>, e: &crate::blocks::Experts) -> Result<DeviceExperts, LoadError> {
+    DeviceExperts::upload(device, e.ty, e.data, e.rows, e.cols, e.count)
+        .map_err(super::vulkan_error)
 }

@@ -41,6 +41,12 @@ impl VulkanMtp {
     pub fn size_bytes(&self) -> usize {
         self.eh_proj.size_bytes() + self.layer.size_bytes()
     }
+
+    /// Uploads the routed experts of the block's layer; see
+    /// [`VulkanLayer::upload_experts`].
+    pub fn upload_experts(&mut self, gpu: &Gpu, m: &Mtp) -> Result<(), LoadError> {
+        self.layer.upload_experts(gpu, &m.layer)
+    }
 }
 
 /// The cache of a model's prediction block on the device, one entry per

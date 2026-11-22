@@ -219,16 +219,29 @@ impl<'m> VulkanModel<'m> {
             device,
         };
         let mut ropes = RopeTables::new(PROMPT_BATCH);
-        let layers = model
+        // The head is read for every token and outweighs any layer, so it
+        // takes its room before them.
+        let output = gpu.matrix(&model.output)?;
+        let output_norm = gpu.vector(&model.output_norm)?;
+        let mut layers = model
             .layers
             .iter()
             .map(|l| VulkanLayer::upload(&gpu, l, &mut ropes))
             .collect::<Result<Vec<_>, _>>()?;
-        let mtp = model
+        let mut mtp = model
             .mtp
             .as_ref()
             .map(|m| VulkanMtp::upload(&gpu, m, &mut ropes))
             .transpose()?;
+        // The routed experts go in last: a model larger than the VRAM keeps
+        // the weights every token reads and spills the one expert in `n`
+        // that a token does.
+        for (layer, l) in layers.iter_mut().zip(&model.layers) {
+            layer.upload_experts(&gpu, l)?;
+        }
+        if let Some((m, mtp)) = model.mtp.as_ref().zip(mtp.as_mut()) {
+            mtp.upload_experts(&gpu, m)?;
+        }
         Ok(VulkanModel {
             name: physical.info().name.clone(),
             context,
@@ -237,10 +250,10 @@ impl<'m> VulkanModel<'m> {
             embd: model.embd,
             embd_scale: model.embd_scale,
             logit_cap: model.logit_cap,
-            output: gpu.matrix(&model.output)?,
+            output,
             output_rows: model.output,
             mtp,
-            output_norm: gpu.vector(&model.output_norm)?,
+            output_norm,
             layers,
             ropes,
             gpu,

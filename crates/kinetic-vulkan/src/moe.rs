@@ -30,39 +30,24 @@ pub struct DeviceExperts {
 }
 
 impl DeviceExperts {
-    /// Copies `data` to the device, one expert at a time so the host never
-    /// holds the planar copy of the whole mixture. Fails for types without
-    /// a GEMV kernel and for row lengths that are not a multiple of 32.
-    pub fn upload(
+    /// Room for `count` experts of `rows`x`cols`, their data left to
+    /// [`DeviceExperts::fill`]. Fails for types without a GEMV kernel and
+    /// for row lengths that are not a multiple of 32.
+    pub fn reserve(
         device: &Rc<Device>,
         ty: TensorType,
-        data: &[u8],
         rows: usize,
         cols: usize,
         count: usize,
+        words: usize,
     ) -> Result<DeviceExperts> {
-        let Some(block) = block_len(ty) else {
+        if block_len(ty).is_none() {
             return Err(Error::Unsupported(ty));
-        };
-        let bytes = rows * cols / block * ty.block_bytes().max(1);
-        if count == 0 || !cols.is_multiple_of(Q8_BLOCK) || data.len() != bytes * count {
-            return Err(Error::Shape(format!(
-                "{count} experts of {rows}x{cols}: {} bytes",
-                data.len()
-            )));
         }
-        let mut words = 0;
-        let mut buffer = DeviceBuffer::<u8>::new(device, 16)?;
-        for e in 0..count {
-            let m = Matrix::new(ty, &data[e * bytes..(e + 1) * bytes], rows, cols);
-            let mut chunk = device_layout(&m).into_owned();
-            // Kernels read whole 16-byte words, also of the last plane.
-            chunk.resize(chunk.len().next_multiple_of(16), 0);
-            if e == 0 {
-                words = chunk.len() / 16;
-                buffer = DeviceBuffer::new(device, words * 16 * count)?;
-            }
-            buffer.copy_range_from(e * words * 16, &chunk)?;
+        if count == 0 || !cols.is_multiple_of(Q8_BLOCK) {
+            return Err(Error::Shape(format!(
+                "{count} experts of {rows}x{cols}"
+            )));
         }
         Ok(DeviceExperts {
             ty,
@@ -71,8 +56,65 @@ impl DeviceExperts {
             count,
             words,
             total_words: words * count,
-            data: buffer,
+            data: DeviceBuffer::new(device, words * 16 * count)?,
         })
+    }
+
+    /// Copies `data`, whose experts follow one another, to the device.
+    pub fn upload(
+        device: &Rc<Device>,
+        ty: TensorType,
+        data: &[u8],
+        rows: usize,
+        cols: usize,
+        count: usize,
+    ) -> Result<DeviceExperts> {
+        let words = DeviceExperts::expert_words(ty, data, rows, cols);
+        let mut experts = DeviceExperts::reserve(device, ty, rows, cols, count, words)?;
+        for e in 0..count {
+            experts.fill(e, data)?;
+        }
+        Ok(experts)
+    }
+
+    /// 16-byte words one expert's matrix takes in the device layout, the
+    /// stride between experts; `first` is any expert's bytes.
+    pub fn expert_words(ty: TensorType, first: &[u8], rows: usize, cols: usize) -> usize {
+        let bytes = match block_len(ty) {
+            Some(block) => rows * cols / block * ty.block_bytes().max(1),
+            None => first.len(),
+        };
+        let m = Matrix::new(ty, &first[..bytes.min(first.len())], rows, cols);
+        // Kernels read whole 16-byte words, also of the last plane.
+        device_layout(&m).len().next_multiple_of(16) / 16
+    }
+
+    /// Copies expert `e` of `data`, whose experts follow one another, into
+    /// the room [`DeviceExperts::reserve`] left; one expert at a time, so
+    /// the host never holds the planar copy of the whole mixture.
+    pub fn fill(&mut self, e: usize, data: &[u8]) -> Result<()> {
+        let Some(block) = block_len(self.ty) else {
+            return Err(Error::Unsupported(self.ty));
+        };
+        let bytes = self.rows * self.cols / block * self.ty.block_bytes().max(1);
+        if e >= self.count || data.len() != bytes * self.count {
+            return Err(Error::Shape(format!(
+                "expert {e} of {} experts of {}x{}: {} bytes",
+                self.count,
+                self.rows,
+                self.cols,
+                data.len()
+            )));
+        }
+        let m = Matrix::new(
+            self.ty,
+            &data[e * bytes..(e + 1) * bytes],
+            self.rows,
+            self.cols,
+        );
+        let mut chunk = device_layout(&m).into_owned();
+        chunk.resize(chunk.len().next_multiple_of(16), 0);
+        self.data.copy_range_from(e * self.words * 16, &chunk)
     }
 
     pub fn ty(&self) -> TensorType {
