@@ -94,7 +94,10 @@ Deux choix assumés, qui ne copient pas llama.cpp :
 - **KV quantifié** (q8_0 d'abord) : 2× de contexte sur 16 Gio, absent aujourd'hui.
 - **Placement mémoire** : sous-allocation d'un grand buffer, cache de pipelines
   persisté, soumission asynchrone (5–15 % attendus, `commands.rs` 160–163).
-- **MoE** : routage top-k + GEMV groupé ; conditionne `qwen3-coder-30b-a3b`.
+- **MoE : fait (voir G5).** Routage top-k et GEMV groupé vivent sur le GPU ;
+  restent à optimiser : pp512 à 489 t/s contre 2637 pour llama, tg128 à 55,7
+  contre 182 sur le même fichier. Le GEMV groupé lit les experts d'un slot à
+  la fois et le préfill n'a pas de GEMM tuilé, d'où l'écart.
 - **Types restants** : IQ4_NL, IQ3_S, Q5_0/Q5_1/Q4_1, Q2_K/Q3_K, MXFP4.
 - Preuve : pp/tg comparés à llama Vulkan après chaque levier, bit-exact conservé.
 
@@ -125,6 +128,9 @@ que le GEMM attaque moins cher.
 - Preuve : mêmes ids que `llama-tokenize`.
 
 ### P0.6 — Architectures (L)
+
+**Fait (voir G5) :** `qwen3moe` et la brique MoE Vulkan, qui débloquent
+`qwen3-coder-30b-a3b`.
 
 Le plus gros gisement : 159 noms. Ordre du document, par brique réutilisable, pas par
 nom :
@@ -186,10 +192,27 @@ les bénéficiaires NVIDIA ne sont pas concernés par ce journal.
 | G1 | Types `IQ3_XXS`, `IQ4_XS`, `Q4_0` refusés sur Vulkan | `0127427` | 27B sur GPU, sortie cohérente, 6+20+1 tests | CPU 3,8 → 154,8 t/s pp512 |
 | G2 | Passe prompt sans noyau many-token pour ces types | `85d29aa` | bit-exact conservé, tests verts | pp512 154,8 → 261,9 t/s ; résidu 4,4× vers P0.2 |
 | G3 | Sampling de llama-server absent : `dynatemp_range/exponent`, `min_keep`, `adaptive_target/decay`, `ignore_eos`, `reasoning_budget_tokens` | non committé | mêmes requêtes rejouées sur les deux serveurs, 22 nov., L3-8B IQ4_XS et Qwen3.5-9B Q4_K_M ; 174 tests unitaires verts (91 modèles + 83 serveur) | champs acceptés des deux côtés ; `ignore_eos` passe de `stop` 4 car. à `length` 167 car. ; budget 8 → 8 tokens de raisonnement contre 200 sans budget |
+| G5 | `qwen3moe` refusé au chargement, experts routés et IQ3_S absents du Vulkan : le 30B A3B retombait sur le CPU | `6141b3b`, `7714f86`, `c729c30` | même fichier chargé sur Vulkan, 1er token identique à la CPU, sorties cohérentes ; passe routée comparée au host sur 3 tokens et 3 types d'experts ; 91 tests modèles + 21 GEMV + 1 MoE verts | le modèle tourne sur GPU : pp512 489 t/s, tg128 55,7 t/s |
 | G4 | Prétokenizer `tekken` absent : `helcyon-gpt-4o-v4.5` refusé au chargement | non committé | mêmes ids que `llama-tokenize` sur 26 lignes de contrôle et sur un fichier entier (83 tokens, identiques), 22 nov. ; 28 tests tokenizer verts ; génération Vulkan 77,3 t/s | le modèle se charge et génère |
 
 G1 et G2 ferment une partie de **§4.3 formats** et amorcent **P0.2** ; G3 ferme la
 partie sampling de **P0.1**, pas ses routes ; G4 ferme la partie `tekken` de **P0.5**.
+
+### Mesures de G5 (22 nov. 2026)
+
+`qwen3-coder-30b-a3b-instruct` UD-IQ3_XXS (11,97 Gio), un seul job GPU à la fois,
+`kinetic bench --device vulkan --prompt 512 -r 2` contre
+`llama-bench -dev Vulkan0 -p 512 -n 128 -r 2` (llama.cpp `19bc41dbb`).
+
+| Test | llama Vulkan0 | kinetic Vulkan |
+|---|---:|---:|
+| pp512 | 2637,4 t/s | 489,0 t/s |
+| tg128 | 181,9 t/s | 55,7 t/s |
+
+CPU kinetic pour la même requête greedy : 8,4 t/s en génération. Le GPU est donc
+6,6× plus rapide que le CPU de Kinetic, mais reste 3,3× sous llama en décodage et
+5,4× en préfill : c'est le chantier P0.2 (GEMM tuilé, GEMV groupé par plusieurs
+tokens) qui reste ouvert, pas un repli CPU.
 
 ### Mesures de G3 (22 nov. 2026)
 
